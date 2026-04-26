@@ -1,11 +1,18 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
     <meta charset="UTF-8">
     <title>Party Animals Physics Test</title>
-    <style> body { margin: 0; overflow: hidden; } </style>
+    <style>
+        body { margin: 0; background: #222; }
+        canvas { display: block; }
+        #info { position: absolute; top: 10px; width: 100%; text-align: center; color: white; pointer-events: none; }
+    </style>
 </head>
 <body>
+    <div id="info">Demo.glb を読み込み中...<br>（表示されない場合はコンソール(F12)を確認してください）</div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
     <script type="importmap">
         {
             "imports": {
@@ -18,53 +25,96 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // --- 1. シーン・カメラ・レンダラーのセットアップ ---
+        // --- 物理演算の基本設定 ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0); // 重力
+        world.broadphase = new CANNON.NaiveBroadphase();
+
+        // --- Three.js の基本設定 ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xa0a0a0);
-        
+        scene.background = new THREE.Color(0x333333);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 2, 5);
-
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(1, 5, 2);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        const light = new THREE.DirectionalLight(0xffffff, 1.5);
+        light.position.set(5, 10, 5);
+        light.castShadow = true;
         scene.add(light);
-        scene.add(new THREE.AmbientLight(0x404040));
+        scene.add(new THREE.AmbientLight(0x888888));
 
-        // --- 2. モデルの読み込み ---
+        // 地面
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0 });
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        world.addBody(groundBody);
+
+        const groundGeo = new THREE.PlaneGeometry(20, 20);
+        const groundMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        // --- モデル読み込みとパーツ連結 ---
         const loader = new GLTFLoader();
+        const physicsBodies = []; // 描画用メッシュと物理ボディを紐付ける配列
+
         loader.load('./Demo.glb', (gltf) => {
             const model = gltf.scene;
             scene.add(model);
+            document.getElementById('info').innerHTML = "読み込み成功！地面に落ちます。";
 
-            // 各パーツにアクセスできるか確認
             model.traverse((child) => {
                 if (child.isMesh) {
-                    console.log("パーツ発見:", child.name);
-                    // ここで child.name が "Body" や "Arm_L" になっているはずです
+                    // パーツごとに物理ボディを作成
+                    const box = new THREE.Box3().setFromObject(child);
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+
+                    const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
+                    const body = new CANNON.Body({
+                        mass: child.name === "Body" ? 2 : 1, // 体を少し重く
+                        position: new CANNON.Vec3(child.worldPosition) // 初期位置
+                    });
+                    body.addShape(shape);
+                    world.addBody(body);
+
+                    physicsBodies.push({ mesh: child, body: body });
                 }
             });
-
-            // ここに物理演算のセットアップ（ラグドール化）を記述していきます
-            setupPhysics(model);
+        }, undefined, (error) => {
+            console.error("エラー発生:", error);
+            document.getElementById('info').innerHTML = "エラー: Demo.glb が見つからないか、読み込めません。";
         });
 
-        // --- 3. 物理演算の簡易セットアップ（概念） ---
-        function setupPhysics(model) {
-            // 本来はここで Cannon.js 等を使って各パーツに「重さ」と「衝突判定」を与え、
-            // パーツ間を「ジョイント（関節）」で繋ぎます。
-            console.log("物理演算を適用する準備ができました");
-        }
-
+        // アニメーションループ
         function animate() {
             requestAnimationFrame(animate);
-            renderer.render(scene, animate);
+            world.step(1/60); // 物理演算を1コマ進める
+
+            // 物理演算の結果を描画用メッシュに反映
+            physicsBodies.forEach(obj => {
+                obj.mesh.position.copy(obj.body.position);
+                obj.mesh.quaternion.copy(obj.body.quaternion);
+            });
+
+            renderer.render(scene, camera);
         }
         animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
