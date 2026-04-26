@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Penguin Run - iPad Edition</title>
+    <title>Penguin Quest - Colormap V2</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; }
         #joystick-container {
             position: absolute; bottom: 50px; left: 50px;
-            width: 120px; height: 120px; background: rgba(255,255,255,0.2);
-            border-radius: 50%; touch-action: none; border: 2px solid white; z-index: 10;
+            width: 120px; height: 120px; background: rgba(255,255,255,0.3);
+            border-radius: 50%; touch-action: none; border: 3px solid white; z-index: 10;
         }
         #joystick-stick {
             position: absolute; top: 35px; left: 35px;
@@ -42,73 +42,77 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // 照明
         const light = new THREE.DirectionalLight(0xffffff, 1.5);
         light.position.set(5, 10, 7);
         light.castShadow = true;
         scene.add(light);
-        scene.add(new THREE.AmbientLight(0x404040));
+        scene.add(new THREE.AmbientLight(0x606060));
 
-        // 地面
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x90ee90 }));
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
         scene.add(floor);
 
-        let dummy, mixer, walkAction;
+        let dummy, mixer, walkAction, penguin;
         let moveDir = { x: 0, z: 0 };
         const gltfLoader = new GLTFLoader();
         const fbxLoader = new FBXLoader();
+        const textureLoader = new THREE.TextureLoader();
 
-        // 1. まず人間（骨組み）を読み込む
-        // ※ dummy.glb に変換済みと想定。FBXのままなら fbxLoader.load('Walking.fbx', ...) に書き換え
-        gltfLoader.load('dummy.glb', (gltf) => {
-            dummy = gltf.scene;
-            dummy.visible = false; // 人間は隠す
-            scene.add(dummy);
+        // 1. テクスチャ読み込みを colormap 2.png に変更
+        const penguinTex = textureLoader.load('colormap 2.png');
+        penguinTex.flipY = false;
 
-            mixer = new THREE.AnimationMixer(dummy);
-            walkAction = mixer.clipAction(gltf.animations[0]);
-            walkAction.play();
-            walkAction.setEffectiveWeight(0);
+        // 2. ペンギンの読み込み
+        gltfLoader.load('animal-penguin.glb', (gltf) => {
+            penguin = gltf.scene;
+            penguin.traverse(child => {
+                if (child.isMesh) {
+                    child.material.map = penguinTex;
+                    child.castShadow = true;
+                }
+            });
 
-            // 2. ペンギン（殻）を読み込んで骨にくっつける
-            gltfLoader.load('animal-penguin.glb', (penguinGltf) => {
-                const penguin = penguinGltf.scene;
-                
-                // パーツを骨に移植する関数
-                const attachPart = (partName, boneName) => {
-                    const part = penguin.getObjectByName(partName);
-                    const bone = dummy.getObjectByName(boneName);
-                    if (part && bone) {
-                        // パーツの位置をリセットして骨の直下に入れる
-                        part.position.set(0, 0, 0); 
-                        bone.add(part);
-                    }
+            // 3. FBX（Walking.fbx）の読み込み
+            fbxLoader.load('Walking.fbx', (object) => {
+                dummy = object;
+                dummy.scale.set(0.01, 0.01, 0.01);
+                dummy.visible = false; 
+                scene.add(dummy);
+
+                mixer = new THREE.AnimationMixer(dummy);
+                if (dummy.animations.length > 0) {
+                    walkAction = mixer.clipAction(dummy.animations[0]);
+                    walkAction.play();
+                    walkAction.setEffectiveWeight(0);
+                }
+
+                // 骨への接着
+                const attach = (partName, boneName) => {
+                    const p = penguin.getObjectByName(partName);
+                    const b = dummy.getObjectByName(boneName);
+                    if (p && b) b.add(p);
                 };
 
-                // Mixamoの骨の名前に合わせてペンギンのパーツを接着
-                attachPart('body', 'mixamorig_Spine');
-                attachPart('head', 'mixamorig_Head');
-                attachPart('wing_left', 'mixamorig_LeftArm');
-                attachPart('wing_right', 'mixamorig_RightArm');
-                attachPart('leg_left', 'mixamorig_LeftLeg');
-                attachPart('leg_right', 'mixamorig_RightLeg');
-                
-                // 残りのパーツ（目や嘴）は体に付随するので、
-                // 上記の attachPart で body ごと移動します。
+                attach('Body', 'mixamorig_Spine');
+                attach('Head', 'mixamorig_Head');
+                attach('Leg_L', 'mixamorig_LeftLeg');
+                attach('Leg_R', 'mixamorig_RightLeg');
+                attach('Wing_L', 'mixamorig_LeftArm');
+                attach('Wing_R', 'mixamorig_RightArm');
+
+                scene.add(penguin);
             });
         });
 
-        // カメラ位置
-        camera.position.set(0, 3, 6);
+        camera.position.set(0, 5, 8);
 
-        // ジョイスティック処理 (省略せず動作するように記述)
+        // ジョイスティック
         const stick = document.getElementById('joystick-stick');
         const container = document.getElementById('joystick-container');
         let isTouching = false;
 
-        container.addEventListener('touchstart', () => isTouching = true);
+        container.addEventListener('touchstart', (e) => { isTouching = true; e.preventDefault(); });
         window.addEventListener('touchend', () => {
             isTouching = false;
             moveDir = { x: 0, z: 0 };
@@ -129,7 +133,7 @@
             moveDir.x = Math.cos(angle) * (dist/40);
             moveDir.z = Math.sin(angle) * (dist/40);
             if (walkAction) walkAction.setEffectiveWeight(1);
-        });
+        }, { passive: false });
 
         function animate() {
             requestAnimationFrame(animate);
@@ -137,21 +141,26 @@
             if (mixer) mixer.update(delta);
 
             if (dummy && (moveDir.x !== 0 || moveDir.z !== 0)) {
-                dummy.position.x += moveDir.x * 0.05;
-                dummy.position.z += moveDir.z * 0.05;
-                dummy.rotation.y = Math.atan2(-moveDir.x, -moveDir.z);
+                dummy.position.x += moveDir.x * 0.1;
+                dummy.position.z += moveDir.z * 0.1;
+                dummy.rotation.y = Math.atan2(-moveDir.x, -moveDir.z) + Math.PI;
             }
 
-            camera.position.lerp(new THREE.Vector3(
-                dummy ? dummy.position.x : 0,
-                5,
-                (dummy ? dummy.position.z : 0) + 8
-            ), 0.1);
-            camera.lookAt(dummy ? dummy.position : new THREE.Vector3(0,0,0));
+            if (dummy) {
+                const targetPos = new THREE.Vector3(dummy.position.x, 5, dummy.position.z + 10);
+                camera.position.lerp(targetPos, 0.1);
+                camera.lookAt(dummy.position);
+            }
 
             renderer.render(scene, camera);
         }
         animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
