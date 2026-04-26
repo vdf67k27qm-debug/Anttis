@@ -2,126 +2,67 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Simple Penguin Walk</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
-        #joystick-container {
-            position: absolute; bottom: 50px; left: 50px;
-            width: 120px; height: 120px; background: rgba(255,255,255,0.3);
-            border-radius: 50%; touch-action: none; border: 3px solid white;
-        }
-        #joystick-stick {
-            position: absolute; top: 35px; left: 35px;
-            width: 50px; height: 50px; background: white; border-radius: 50%;
-        }
-    </style>
+    <title>Party Animals Physics Test</title>
+    <style> body { margin: 0; overflow: hidden; } </style>
 </head>
 <body>
-    <div id="joystick-container"><div id="joystick-stick"></div></div>
-
     <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
         }
-    }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+        // --- 1. シーン・カメラ・レンダラーのセットアップ ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB);
+        scene.background = new THREE.Color(0xa0a0a0);
+        
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 5);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x90ee90 }));
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(1, 5, 2);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
 
-        let penguin = new THREE.Group(); // ペンギン全体をまとめる箱
-        let parts = {};
-        let isMoving = false;
-        let moveDir = { x: 0, z: 0 };
-
-        // 1. ペンギンの読み込み
-        new GLTFLoader().load('animal-penguin.glb', (gltf) => {
+        // --- 2. モデルの読み込み ---
+        const loader = new GLTFLoader();
+        loader.load('./Demo.glb', (gltf) => {
             const model = gltf.scene;
-            const tex = new THREE.TextureLoader().load('colormap 2.png');
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.flipY = false;
+            scene.add(model);
 
-            model.traverse(child => {
+            // 各パーツにアクセスできるか確認
+            model.traverse((child) => {
                 if (child.isMesh) {
-                    child.material.map = tex;
-                    const name = child.name.toLowerCase();
-                    // パーツを特定して記録
-                    if (name.includes('body')) parts.body = child;
-                    if (name.includes('leg') && name.includes('l')) parts.legL = child;
-                    if (name.includes('leg') && name.includes('r')) parts.legR = child;
-                    if (name.includes('wing') && name.includes('l')) parts.wingL = child;
-                    if (name.includes('wing') && name.includes('r')) parts.wingR = child;
+                    console.log("パーツ発見:", child.name);
+                    // ここで child.name が "Body" や "Arm_L" になっているはずです
                 }
             });
-            penguin.add(model);
-            scene.add(penguin);
+
+            // ここに物理演算のセットアップ（ラグドール化）を記述していきます
+            setupPhysics(model);
         });
 
-        // ジョイスティック
-        const stick = document.getElementById('joystick-stick');
-        const container = document.getElementById('joystick-container');
-        window.addEventListener('touchstart', () => isMoving = true);
-        window.addEventListener('touchend', () => { 
-            isMoving = false; moveDir = {x:0, z:0}; stick.style.transform = `translate(0,0)`;
-        });
-        window.addEventListener('touchmove', (e) => {
-            const rect = container.getBoundingClientRect();
-            const touch = e.touches[0];
-            const dx = (touch.clientX - (rect.left + rect.width/2));
-            const dy = (touch.clientY - (rect.top + rect.height/2));
-            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
-            const angle = Math.atan2(dy, dx);
-            moveDir.x = Math.cos(angle) * (dist/40);
-            moveDir.z = Math.sin(angle) * (dist/40);
-            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
-        });
+        // --- 3. 物理演算の簡易セットアップ（概念） ---
+        function setupPhysics(model) {
+            // 本来はここで Cannon.js 等を使って各パーツに「重さ」と「衝突判定」を与え、
+            // パーツ間を「ジョイント（関節）」で繋ぎます。
+            console.log("物理演算を適用する準備ができました");
+        }
 
         function animate() {
             requestAnimationFrame(animate);
-            const time = Date.now() * 0.01;
-
-            if (isMoving && penguin) {
-                // 1. 移動と回転
-                penguin.position.x += moveDir.x * 0.1;
-                penguin.position.z += moveDir.z * 0.1;
-                penguin.rotation.y = Math.atan2(-moveDir.x, -moveDir.z);
-
-                // 2. 「ひょこひょこ」アニメーション (骨組みなし！)
-                // 体を左右に揺らす
-                penguin.rotation.z = Math.sin(time) * 0.1;
-                // 足を交互に動かす
-                if (parts.legL) parts.legL.rotation.x = Math.sin(time) * 0.5;
-                if (parts.legR) parts.legR.rotation.x = Math.cos(time) * 0.5;
-                // 翼をパタパタさせる
-                if (parts.wingL) parts.wingL.rotation.z = Math.PI/2 + Math.sin(time) * 0.2;
-                if (parts.wingR) parts.wingR.rotation.z = -Math.PI/2 - Math.sin(time) * 0.2;
-            } else if (penguin) {
-                // 止まっている時はポーズを戻す
-                penguin.rotation.z = 0;
-                if (parts.legL) parts.legL.rotation.x = 0;
-                if (parts.legR) parts.legR.rotation.x = 0;
-            }
-
-            camera.position.set(penguin.position.x, 3, penguin.position.z + 5);
-            camera.lookAt(penguin.position);
-            renderer.render(scene, camera);
+            renderer.render(scene, animate);
         }
         animate();
     </script>
