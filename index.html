@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Penguin Quest - Fix</title>
+    <title>Penguin Quest - Fix Vol.3</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; }
         #joystick-container {
@@ -39,15 +39,12 @@
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        // 色を明るく鮮やかにするための設定
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
 
-        // ライトをかなり強く設定（グレー対策）
-        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0); // 全体を明るく
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
         scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
         sunLight.position.set(5, 10, 7);
         scene.add(sunLight);
 
@@ -61,27 +58,20 @@
         const fbxLoader = new FBXLoader();
         const textureLoader = new THREE.TextureLoader();
 
-        // 1. テクスチャ読み込み
-        const penguinTex = textureLoader.load('colormap 2.png', (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace; // テクスチャ自体の色空間も修正
-        });
+        const penguinTex = textureLoader.load('colormap 2.png');
+        penguinTex.colorSpace = THREE.SRGBColorSpace;
         penguinTex.flipY = false;
 
-        // 2. ペンギンの読み込み
+        // ペンギン読み込み
         gltfLoader.load('animal-penguin.glb', (gltf) => {
             penguin = gltf.scene;
             penguin.traverse(child => {
                 if (child.isMesh) {
-                    // 発光設定（Emissive）を少し足してグレーを飛ばす
                     child.material.map = penguinTex;
-                    child.material.emissive = new THREE.Color(0xffffff);
-                    child.material.emissiveMap = penguinTex;
-                    child.material.emissiveIntensity = 0.2; 
-                    child.castShadow = true;
                 }
             });
 
-            // 3. FBX（Walking.fbx）の読み込み
+            // 骨組みFBX読み込み
             fbxLoader.load('Walking.fbx', (object) => {
                 dummy = object;
                 dummy.scale.set(0.01, 0.01, 0.01);
@@ -89,33 +79,36 @@
                 scene.add(dummy);
 
                 mixer = new THREE.AnimationMixer(dummy);
-                // アニメーションを確実に取得して即再生
-                if (dummy.animations && dummy.animations.length > 0) {
+                if (dummy.animations.length > 0) {
                     walkAction = mixer.clipAction(dummy.animations[0]);
                     walkAction.play();
-                    walkAction.setEffectiveWeight(0); // 最初は待機
-                    console.log("Animation Loaded!");
+                    walkAction.setEffectiveWeight(0);
                 }
 
-                // 骨への接着
-                const attach = (partName, boneName) => {
-                    const p = penguin.getObjectByName(partName);
-                    const b = dummy.getObjectByName(boneName);
-                    if (p && b) b.add(p);
+                // --- 合体ロジックの強化 ---
+                // パーツ名が Body でも body でも見つけられるようにする
+                const findAndAttach = (regex, boneName) => {
+                    const bone = dummy.getObjectByName(boneName);
+                    if (!bone) return;
+                    penguin.traverse(child => {
+                        if (child.isMesh && regex.test(child.name)) {
+                            child.position.set(0, 0, 0);
+                            bone.add(child);
+                        }
+                    });
                 };
 
-                attach('Body', 'mixamorig_Spine');
-                attach('Head', 'mixamorig_Head');
-                attach('Leg_L', 'mixamorig_LeftLeg');
-                attach('Leg_R', 'mixamorig_RightLeg');
-                attach('Wing_L', 'mixamorig_LeftArm');
-                attach('Wing_R', 'mixamorig_RightArm');
+                // 正規表現で名前を曖昧に検索して接着
+                findAndAttach(/body/i, 'mixamorig_Spine');
+                findAndAttach(/head/i, 'mixamorig_Head');
+                findAndAttach(/leg.*l/i, 'mixamorig_LeftLeg');
+                findAndAttach(/leg.*r/i, 'mixamorig_RightLeg');
+                findAndAttach(/wing.*l/i, 'mixamorig_LeftArm');
+                findAndAttach(/wing.*r/i, 'mixamorig_RightArm');
 
                 scene.add(penguin);
             });
         });
-
-        camera.position.set(0, 5, 8);
 
         // ジョイスティック
         const stick = document.getElementById('joystick-stick');
@@ -142,28 +135,28 @@
             stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
             moveDir.x = Math.cos(angle) * (dist/40);
             moveDir.z = Math.sin(angle) * (dist/40);
-            
-            // ジョイスティックを動かしている間だけアニメーションの重みを1にする
             if (walkAction) walkAction.setEffectiveWeight(1);
         }, { passive: false });
 
-        const clock = new THREE.Clock(); // アニメーションの時間を正確に測る
+        const clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
-            const delta = clock.getDelta(); // ここを修正：deltaを正しく取得
+            const delta = clock.getDelta();
             if (mixer) mixer.update(delta);
 
             if (dummy && (moveDir.x !== 0 || moveDir.z !== 0)) {
-                dummy.position.x += moveDir.x * 0.1;
-                dummy.position.z += moveDir.z * 0.1;
+                // ペンギンの移動速度
+                dummy.position.x += moveDir.x * 0.05;
+                dummy.position.z += moveDir.z * 0.05;
                 dummy.rotation.y = Math.atan2(-moveDir.x, -moveDir.z) + Math.PI;
             }
 
             if (dummy) {
-                const targetPos = new THREE.Vector3(dummy.position.x, 5, dummy.position.z + 10);
+                // カメラがペンギンの後ろを追従
+                const targetPos = new THREE.Vector3(dummy.position.x, 3, dummy.position.z + 5);
                 camera.position.lerp(targetPos, 0.1);
-                camera.lookAt(dummy.position);
+                camera.lookAt(dummy.position.x, 1, dummy.position.z);
             }
 
             renderer.render(scene, camera);
