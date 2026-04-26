@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>iPad 3D Action Game Base</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
+        /* ジョイスティックの見た目 */
+        #joystick-base {
+            position: absolute; bottom: 50px; left: 50px;
+            width: 120px; height: 120px; background: rgba(255,255,255,0.2);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        }
+        #joystick-stick {
+            width: 50px; height: 50px; background: #fff; border-radius: 50%;
+        }
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px; color: white; font-family: sans-serif;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h2>T-Shirt Project Game (Alpha)</h2>
+        <p>Color: Gold Yellow (Player 1)</p>
+    </div>
+
+    <div id="joystick-base">
+        <div id="joystick-stick"></div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // --- 1. 基本設定 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // ライト
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        sunLight.position.set(5, 10, 5);
+        scene.add(sunLight);
+
+        // --- 2. 物理エンジンの設定 ---
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+
+        // 地面 (物理)
+        const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // 地面 (表示)
+        const groundGeo = new THREE.PlaneGeometry(20, 20);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x333333 }); // ダークグレー
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.rotation.x = -Math.PI / 2;
+        scene.add(groundMesh);
+
+        // --- 3. プレイヤー作成 (VoxelMaxモデルの代わり) ---
+        const playerShape = new CANNON.Sphere(0.5); // 「ふにゃふにゃ」の基本は球体
+        const playerBody = new CANNON.Body({ mass: 5, shape: playerShape });
+        playerBody.position.set(0, 5, 0);
+        world.addBody(playerBody);
+
+        const playerGeo = new THREE.SphereGeometry(0.5);
+        const playerMat = new THREE.MeshStandardMaterial({ color: 0xFFD700 }); // ゴールドイエロー
+        const playerMesh = new THREE.Mesh(playerGeo, playerMat);
+        scene.add(playerMesh);
+
+        // --- 4. タッチ操作 (ジョイスティック) ---
+        let moveInput = { x: 0, y: 0 };
+        const stick = document.getElementById('joystick-stick');
+        
+        window.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            const base = document.getElementById('joystick-base').getBoundingClientRect();
+            const centerX = base.left + base.width / 2;
+            const centerY = base.top + base.height / 2;
+            
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
+            const angle = Math.atan2(dy, dx);
+            
+            const lx = Math.cos(angle) * dist;
+            const ly = Math.sin(angle) * dist;
+            
+            stick.style.transform = `translate(${lx}px, ${ly}px)`;
+            
+            // 物理演算への入力値（0.0 〜 1.0）
+            moveInput.x = lx / 50;
+            moveInput.y = ly / 50;
+        });
+
+        window.addEventListener('touchend', () => {
+            stick.style.transform = `translate(0, 0)`;
+            moveInput = { x: 0, y: 0 };
+        });
+
+        // --- 5. ゲームループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // 物理エンジンの時間を進める
+            world.fixedStep();
+
+            // プレイヤーの移動
+            playerBody.velocity.x = moveInput.x * 5;
+            playerBody.velocity.z = moveInput.y * 5;
+
+            // 物理ボディの位置を表示メッシュに反映
+            playerMesh.position.copy(playerBody.position);
+            playerMesh.quaternion.copy(playerBody.quaternion);
+
+            // カメラ追従
+            camera.position.set(playerMesh.position.x, playerMesh.position.y + 5, playerMesh.position.z + 8);
+            camera.lookAt(playerMesh.position);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // リサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
