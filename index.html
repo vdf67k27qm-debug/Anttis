@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Penguin Quest - Colormap V2</title>
+    <title>Penguin Quest - Fix</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; }
         #joystick-container {
@@ -40,17 +40,19 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
+        // 色を明るく鮮やかにするための設定
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1.5);
-        light.position.set(5, 10, 7);
-        light.castShadow = true;
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0x606060));
+        // ライトをかなり強く設定（グレー対策）
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0); // 全体を明るく
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.position.set(5, 10, 7);
+        scene.add(sunLight);
 
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x90ee90 }));
         floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
         scene.add(floor);
 
         let dummy, mixer, walkAction, penguin;
@@ -59,8 +61,10 @@
         const fbxLoader = new FBXLoader();
         const textureLoader = new THREE.TextureLoader();
 
-        // 1. テクスチャ読み込みを colormap 2.png に変更
-        const penguinTex = textureLoader.load('colormap 2.png');
+        // 1. テクスチャ読み込み
+        const penguinTex = textureLoader.load('colormap 2.png', (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace; // テクスチャ自体の色空間も修正
+        });
         penguinTex.flipY = false;
 
         // 2. ペンギンの読み込み
@@ -68,7 +72,11 @@
             penguin = gltf.scene;
             penguin.traverse(child => {
                 if (child.isMesh) {
+                    // 発光設定（Emissive）を少し足してグレーを飛ばす
                     child.material.map = penguinTex;
+                    child.material.emissive = new THREE.Color(0xffffff);
+                    child.material.emissiveMap = penguinTex;
+                    child.material.emissiveIntensity = 0.2; 
                     child.castShadow = true;
                 }
             });
@@ -81,10 +89,12 @@
                 scene.add(dummy);
 
                 mixer = new THREE.AnimationMixer(dummy);
-                if (dummy.animations.length > 0) {
+                // アニメーションを確実に取得して即再生
+                if (dummy.animations && dummy.animations.length > 0) {
                     walkAction = mixer.clipAction(dummy.animations[0]);
                     walkAction.play();
-                    walkAction.setEffectiveWeight(0);
+                    walkAction.setEffectiveWeight(0); // 最初は待機
+                    console.log("Animation Loaded!");
                 }
 
                 // 骨への接着
@@ -112,7 +122,7 @@
         const container = document.getElementById('joystick-container');
         let isTouching = false;
 
-        container.addEventListener('touchstart', (e) => { isTouching = true; e.preventDefault(); });
+        container.addEventListener('touchstart', (e) => { isTouching = true; e.preventDefault(); }, {passive: false});
         window.addEventListener('touchend', () => {
             isTouching = false;
             moveDir = { x: 0, z: 0 };
@@ -132,12 +142,16 @@
             stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
             moveDir.x = Math.cos(angle) * (dist/40);
             moveDir.z = Math.sin(angle) * (dist/40);
+            
+            // ジョイスティックを動かしている間だけアニメーションの重みを1にする
             if (walkAction) walkAction.setEffectiveWeight(1);
         }, { passive: false });
 
+        const clock = new THREE.Clock(); // アニメーションの時間を正確に測る
+
         function animate() {
             requestAnimationFrame(animate);
-            const delta = 0.016;
+            const delta = clock.getDelta(); // ここを修正：deltaを正しく取得
             if (mixer) mixer.update(delta);
 
             if (dummy && (moveDir.x !== 0 || moveDir.z !== 0)) {
