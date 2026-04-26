@@ -3,148 +3,155 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>iPad 3D Action Game Base</title>
+    <title>Penguin Run - iPad Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
-        /* ジョイスティックの見た目 */
-        #joystick-base {
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        #joystick-container {
             position: absolute; bottom: 50px; left: 50px;
             width: 120px; height: 120px; background: rgba(255,255,255,0.2);
-            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; touch-action: none; border: 2px solid white; z-index: 10;
         }
         #joystick-stick {
-            width: 50px; height: 50px; background: #fff; border-radius: 50%;
-        }
-        #ui-layer {
-            position: absolute; top: 20px; left: 20px; color: white; font-family: sans-serif;
-            pointer-events: none;
+            position: absolute; top: 35px; left: 35px;
+            width: 50px; height: 50px; background: white; border-radius: 50%;
         }
     </style>
 </head>
 <body>
-
-    <div id="ui-layer">
-        <h2>T-Shirt Project Game (Alpha)</h2>
-        <p>Color: Gold Yellow (Player 1)</p>
-    </div>
-
-    <div id="joystick-base">
-        <div id="joystick-stick"></div>
-    </div>
+    <div id="joystick-container"><div id="joystick-stick"></div></div>
 
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
     }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
-        import * as CANNON from 'cannon-es';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-        // --- 1. 基本設定 ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x222222);
+        scene.background = new THREE.Color(0x87CEEB);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // ライト
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-        scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
-        sunLight.position.set(5, 10, 5);
-        scene.add(sunLight);
+        // 照明
+        const light = new THREE.DirectionalLight(0xffffff, 1.5);
+        light.position.set(5, 10, 7);
+        light.castShadow = true;
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
 
-        // --- 2. 物理エンジンの設定 ---
-        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+        // 地面
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x90ee90 }));
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
 
-        // 地面 (物理)
-        const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        world.addBody(groundBody);
+        let dummy, mixer, walkAction;
+        let moveDir = { x: 0, z: 0 };
+        const gltfLoader = new GLTFLoader();
+        const fbxLoader = new FBXLoader();
 
-        // 地面 (表示)
-        const groundGeo = new THREE.PlaneGeometry(20, 20);
-        const groundMat = new THREE.MeshStandardMaterial({ color: 0x333333 }); // ダークグレー
-        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
-        groundMesh.rotation.x = -Math.PI / 2;
-        scene.add(groundMesh);
+        // 1. まず人間（骨組み）を読み込む
+        // ※ dummy.glb に変換済みと想定。FBXのままなら fbxLoader.load('Walking.fbx', ...) に書き換え
+        gltfLoader.load('dummy.glb', (gltf) => {
+            dummy = gltf.scene;
+            dummy.visible = false; // 人間は隠す
+            scene.add(dummy);
 
-        // --- 3. プレイヤー作成 (VoxelMaxモデルの代わり) ---
-        const playerShape = new CANNON.Sphere(0.5); // 「ふにゃふにゃ」の基本は球体
-        const playerBody = new CANNON.Body({ mass: 5, shape: playerShape });
-        playerBody.position.set(0, 5, 0);
-        world.addBody(playerBody);
+            mixer = new THREE.AnimationMixer(dummy);
+            walkAction = mixer.clipAction(gltf.animations[0]);
+            walkAction.play();
+            walkAction.setEffectiveWeight(0);
 
-        const playerGeo = new THREE.SphereGeometry(0.5);
-        const playerMat = new THREE.MeshStandardMaterial({ color: 0xFFD700 }); // ゴールドイエロー
-        const playerMesh = new THREE.Mesh(playerGeo, playerMat);
-        scene.add(playerMesh);
+            // 2. ペンギン（殻）を読み込んで骨にくっつける
+            gltfLoader.load('animal-penguin.glb', (penguinGltf) => {
+                const penguin = penguinGltf.scene;
+                
+                // パーツを骨に移植する関数
+                const attachPart = (partName, boneName) => {
+                    const part = penguin.getObjectByName(partName);
+                    const bone = dummy.getObjectByName(boneName);
+                    if (part && bone) {
+                        // パーツの位置をリセットして骨の直下に入れる
+                        part.position.set(0, 0, 0); 
+                        bone.add(part);
+                    }
+                };
 
-        // --- 4. タッチ操作 (ジョイスティック) ---
-        let moveInput = { x: 0, y: 0 };
+                // Mixamoの骨の名前に合わせてペンギンのパーツを接着
+                attachPart('body', 'mixamorig_Spine');
+                attachPart('head', 'mixamorig_Head');
+                attachPart('wing_left', 'mixamorig_LeftArm');
+                attachPart('wing_right', 'mixamorig_RightArm');
+                attachPart('leg_left', 'mixamorig_LeftLeg');
+                attachPart('leg_right', 'mixamorig_RightLeg');
+                
+                // 残りのパーツ（目や嘴）は体に付随するので、
+                // 上記の attachPart で body ごと移動します。
+            });
+        });
+
+        // カメラ位置
+        camera.position.set(0, 3, 6);
+
+        // ジョイスティック処理 (省略せず動作するように記述)
         const stick = document.getElementById('joystick-stick');
-        
+        const container = document.getElementById('joystick-container');
+        let isTouching = false;
+
+        container.addEventListener('touchstart', () => isTouching = true);
+        window.addEventListener('touchend', () => {
+            isTouching = false;
+            moveDir = { x: 0, z: 0 };
+            stick.style.transform = `translate(0, 0)`;
+            if (walkAction) walkAction.setEffectiveWeight(0);
+        });
+
         window.addEventListener('touchmove', (e) => {
+            if (!isTouching) return;
+            const rect = container.getBoundingClientRect();
             const touch = e.touches[0];
-            const base = document.getElementById('joystick-base').getBoundingClientRect();
-            const centerX = base.left + base.width / 2;
-            const centerY = base.top + base.height / 2;
-            
-            let dx = touch.clientX - centerX;
-            let dy = touch.clientY - centerY;
-            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
+            const dx = touch.clientX - (rect.left + rect.width/2);
+            const dy = touch.clientY - (rect.top + rect.height/2);
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
             const angle = Math.atan2(dy, dx);
             
-            const lx = Math.cos(angle) * dist;
-            const ly = Math.sin(angle) * dist;
-            
-            stick.style.transform = `translate(${lx}px, ${ly}px)`;
-            
-            // 物理演算への入力値（0.0 〜 1.0）
-            moveInput.x = lx / 50;
-            moveInput.y = ly / 50;
+            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+            moveDir.x = Math.cos(angle) * (dist/40);
+            moveDir.z = Math.sin(angle) * (dist/40);
+            if (walkAction) walkAction.setEffectiveWeight(1);
         });
 
-        window.addEventListener('touchend', () => {
-            stick.style.transform = `translate(0, 0)`;
-            moveInput = { x: 0, y: 0 };
-        });
-
-        // --- 5. ゲームループ ---
         function animate() {
             requestAnimationFrame(animate);
-            
-            // 物理エンジンの時間を進める
-            world.fixedStep();
+            const delta = 0.016;
+            if (mixer) mixer.update(delta);
 
-            // プレイヤーの移動
-            playerBody.velocity.x = moveInput.x * 5;
-            playerBody.velocity.z = moveInput.y * 5;
+            if (dummy && (moveDir.x !== 0 || moveDir.z !== 0)) {
+                dummy.position.x += moveDir.x * 0.05;
+                dummy.position.z += moveDir.z * 0.05;
+                dummy.rotation.y = Math.atan2(-moveDir.x, -moveDir.z);
+            }
 
-            // 物理ボディの位置を表示メッシュに反映
-            playerMesh.position.copy(playerBody.position);
-            playerMesh.quaternion.copy(playerBody.quaternion);
-
-            // カメラ追従
-            camera.position.set(playerMesh.position.x, playerMesh.position.y + 5, playerMesh.position.z + 8);
-            camera.lookAt(playerMesh.position);
+            camera.position.lerp(new THREE.Vector3(
+                dummy ? dummy.position.x : 0,
+                5,
+                (dummy ? dummy.position.z : 0) + 8
+            ), 0.1);
+            camera.lookAt(dummy ? dummy.position : new THREE.Vector3(0,0,0));
 
             renderer.render(scene, camera);
         }
         animate();
-
-        // リサイズ対応
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
