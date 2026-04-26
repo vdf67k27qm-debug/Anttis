@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Penguin Quest - Perfect Sync</title>
+    <title>Simple Penguin Walk</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; }
         #joystick-container {
             position: absolute; bottom: 50px; left: 50px;
             width: 120px; height: 120px; background: rgba(255,255,255,0.3);
-            border-radius: 50%; touch-action: none; border: 3px solid white; z-index: 10;
+            border-radius: 50%; touch-action: none; border: 3px solid white;
         }
         #joystick-stick {
             position: absolute; top: 35px; left: 35px;
@@ -32,7 +32,6 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB);
@@ -42,142 +41,86 @@
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 1.8));
-        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-        sun.position.set(5, 10, 5);
-        scene.add(sun);
-
+        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x90ee90 }));
         floor.rotation.x = -Math.PI / 2;
         scene.add(floor);
 
-        let dummy, mixer, walkAction;
+        let penguin = new THREE.Group(); // ペンギン全体をまとめる箱
+        let parts = {};
+        let isMoving = false;
         let moveDir = { x: 0, z: 0 };
-        const clock = new THREE.Clock();
 
-        const gltfLoader = new GLTFLoader();
-        const fbxLoader = new FBXLoader();
-        const texLoader = new THREE.TextureLoader();
+        // 1. ペンギンの読み込み
+        new GLTFLoader().load('animal-penguin.glb', (gltf) => {
+            const model = gltf.scene;
+            const tex = new THREE.TextureLoader().load('colormap 2.png');
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.flipY = false;
 
-        // 1. テクスチャ
-        const tex = texLoader.load('colormap 2.png');
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.flipY = false;
-
-        // 2. ペンギン読み込み
-        gltfLoader.load('animal-penguin.glb', (gltf) => {
-            const penguinModel = gltf.scene;
-
-            // 3. 骨組み（FBX）読み込み
-            fbxLoader.load('Walking.fbx', (fbx) => {
-                dummy = fbx;
-                dummy.scale.set(0.01, 0.01, 0.01);
-                dummy.visible = false; // 骨（人間）は見せない
-                scene.add(dummy);
-
-                mixer = new THREE.AnimationMixer(dummy);
-                if (fbx.animations.length > 0) {
-                    walkAction = mixer.clipAction(fbx.animations[0]);
-                    walkAction.play();
-                    walkAction.setEffectiveWeight(0);
+            model.traverse(child => {
+                if (child.isMesh) {
+                    child.material.map = tex;
+                    const name = child.name.toLowerCase();
+                    // パーツを特定して記録
+                    if (name.includes('body')) parts.body = child;
+                    if (name.includes('leg') && name.includes('l')) parts.legL = child;
+                    if (name.includes('leg') && name.includes('r')) parts.legR = child;
+                    if (name.includes('wing') && name.includes('l')) parts.wingL = child;
+                    if (name.includes('wing') && name.includes('r')) parts.wingR = child;
                 }
-
-                // --- 究極の合体システム ---
-                const attachToBone = (boneName, keywords) => {
-                    const bone = dummy.getObjectByName(boneName);
-                    if (!bone) return;
-
-                    penguinModel.traverse(child => {
-                        if (child.isMesh) {
-                            const name = child.name.toLowerCase();
-                            // キーワード（'body'など）が含まれているパーツを探す
-                            if (keywords.some(k => name.includes(k))) {
-                                // 重要：元の親から切り離して骨の直下に入れる
-                                child.position.set(0, 0, 0); // 位置をリセット
-                                child.rotation.set(0, 0, 0); // 回転をリセット
-                                // 向きの調整（ペンギンが横を向く場合はここを調整）
-                                if (name.includes('wing')) child.rotation.z = Math.PI/2; 
-                                
-                                child.material.map = tex;
-                                bone.add(child);
-                            }
-                        }
-                    });
-                };
-
-                // Mixamoの骨の名前にペンギンのパーツを「強制上書き」で接着
-                attachToBone('mixamorig_Spine', ['body']);
-                attachToBone('mixamorig_Head', ['head', 'beak', 'eye']);
-                attachToBone('mixamorig_LeftLeg', ['leg', 'foot'], true); // 'l'判定は後述で細分化も可
-                attachToBone('mixamorig_RightLeg', ['leg', 'foot']);
-                attachToBone('mixamorig_LeftArm', ['wing', 'arm']);
-                attachToBone('mixamorig_RightArm', ['wing', 'arm']);
-
-                // 左右の脚をより正確に分けるための追加処理
-                penguinModel.traverse(child => {
-                    if (child.isMesh) {
-                        const name = child.name.toLowerCase();
-                        let targetBone;
-                        if ((name.includes('leg') || name.includes('wing'))) {
-                            if (name.includes('l') || name.includes('left')) {
-                                targetBone = dummy.getObjectByName(name.includes('leg') ? 'mixamorig_LeftLeg' : 'mixamorig_LeftArm');
-                            } else if (name.includes('r') || name.includes('right')) {
-                                targetBone = dummy.getObjectByName(name.includes('leg') ? 'mixamorig_RightLeg' : 'mixamorig_RightArm');
-                            }
-                            if (targetBone) {
-                                child.position.set(0,0,0);
-                                targetBone.add(child);
-                            }
-                        }
-                    }
-                });
             });
+            penguin.add(model);
+            scene.add(penguin);
         });
 
         // ジョイスティック
         const stick = document.getElementById('joystick-stick');
         const container = document.getElementById('joystick-container');
-        let touching = false;
-
-        container.addEventListener('touchstart', (e) => { touching = true; e.preventDefault(); }, {passive: false});
-        window.addEventListener('touchend', () => {
-            touching = false;
-            moveDir = { x: 0, z: 0 };
-            stick.style.transform = `translate(0, 0)`;
-            if (walkAction) walkAction.setEffectiveWeight(0);
+        window.addEventListener('touchstart', () => isMoving = true);
+        window.addEventListener('touchend', () => { 
+            isMoving = false; moveDir = {x:0, z:0}; stick.style.transform = `translate(0,0)`;
         });
-
         window.addEventListener('touchmove', (e) => {
-            if (!touching) return;
             const rect = container.getBoundingClientRect();
             const touch = e.touches[0];
-            const dx = touch.clientX - (rect.left + rect.width/2);
-            const dy = touch.clientY - (rect.top + rect.height/2);
+            const dx = (touch.clientX - (rect.left + rect.width/2));
+            const dy = (touch.clientY - (rect.top + rect.height/2));
             const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
             const angle = Math.atan2(dy, dx);
-            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
             moveDir.x = Math.cos(angle) * (dist/40);
             moveDir.z = Math.sin(angle) * (dist/40);
-            if (walkAction) walkAction.setEffectiveWeight(1);
-        }, { passive: false });
+            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+        });
 
         function animate() {
             requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            if (mixer) mixer.update(delta);
+            const time = Date.now() * 0.01;
 
-            if (dummy && (moveDir.x !== 0 || moveDir.z !== 0)) {
-                dummy.position.x += moveDir.x * 0.08;
-                dummy.position.z += moveDir.z * 0.08;
-                dummy.rotation.y = Math.atan2(-moveDir.x, -moveDir.z) + Math.PI;
+            if (isMoving && penguin) {
+                // 1. 移動と回転
+                penguin.position.x += moveDir.x * 0.1;
+                penguin.position.z += moveDir.z * 0.1;
+                penguin.rotation.y = Math.atan2(-moveDir.x, -moveDir.z);
+
+                // 2. 「ひょこひょこ」アニメーション (骨組みなし！)
+                // 体を左右に揺らす
+                penguin.rotation.z = Math.sin(time) * 0.1;
+                // 足を交互に動かす
+                if (parts.legL) parts.legL.rotation.x = Math.sin(time) * 0.5;
+                if (parts.legR) parts.legR.rotation.x = Math.cos(time) * 0.5;
+                // 翼をパタパタさせる
+                if (parts.wingL) parts.wingL.rotation.z = Math.PI/2 + Math.sin(time) * 0.2;
+                if (parts.wingR) parts.wingR.rotation.z = -Math.PI/2 - Math.sin(time) * 0.2;
+            } else if (penguin) {
+                // 止まっている時はポーズを戻す
+                penguin.rotation.z = 0;
+                if (parts.legL) parts.legL.rotation.x = 0;
+                if (parts.legR) parts.legR.rotation.x = 0;
             }
 
-            if (dummy) {
-                const targetCam = new THREE.Vector3(dummy.position.x, 3, dummy.position.z + 5);
-                camera.position.lerp(targetCam, 0.1);
-                camera.lookAt(dummy.position.x, 0.5, dummy.position.z);
-            }
-
+            camera.position.set(penguin.position.x, 3, penguin.position.z + 5);
+            camera.lookAt(penguin.position);
             renderer.render(scene, camera);
         }
         animate();
