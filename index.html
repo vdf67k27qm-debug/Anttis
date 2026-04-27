@@ -1,120 +1,97 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Party Animals Physics Test</title>
-    <style>
-        body { margin: 0; background: #222; }
-        canvas { display: block; }
-        #info { position: absolute; top: 10px; width: 100%; text-align: center; color: white; pointer-events: none; }
-    </style>
-</head>
-<body>
-    <div id="info">Demo.glb を読み込み中...<br>（表示されない場合はコンソール(F12)を確認してください）</div>
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import * as CANNON from 'cannon-es';
+
+// --- 1. 物理ワールドの設定 ---
+const world = new CANNON.World();
+world.gravity.set(0, -9.82, 0); // 重力
+
+// 衝突グループの設定（自分自身とはぶつからないようにする）
+const GROUP_PLAYER = 1;
+const GROUP_OTHERS = 2;
+
+// --- 2. キャラクター構成 ---
+let bodyMesh, armLMesh, armRMesh, legLMesh, legRMesh;
+let bodyBody, armLBody, armRBody, legLBody, legRBody;
+
+const loader = new GLTFLoader();
+loader.load('Base.glb', (gltf) => {
+    const scene = gltf.scene;
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+    // 各パーツの取り出し（ボクセルマックスでの名前に合わせてください）
+    bodyMesh = scene.getObjectByName('Body');
+    armLMesh = scene.getObjectByName('Arm_L');
+    armRMesh = scene.getObjectByName('Arm_R');
+    legLMesh = scene.getObjectByName('Leg_L');
+    legRMesh = scene.getObjectByName('Leg_R');
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    // --- 物理ボディの作成 (Body) ---
+    bodyBody = new CANNON.Body({
+        mass: 5,
+        shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.8, 0.5)), // サイズはモデルに合わせ調整
+        position: new CANNON.Vec3(0, 5, 0),
+        angularDamping: 0.9, // 回転しにくくする（起き上がりこぼし効果）
+        collisionFilterGroup: GROUP_PLAYER,
+        collisionFilterMask: GROUP_OTHERS // 自分のパーツ以外とだけぶつかる
+    });
+    world.addBody(bodyBody);
 
-        // --- 物理演算の基本設定 ---
-        const world = new CANNON.World();
-        world.gravity.set(0, -9.82, 0); // 重力
-        world.broadphase = new CANNON.NaiveBroadphase();
+    // --- 腕の作成と接続 (Arm_L) ---
+    armLBody = createLimb(armLMesh, new CANNON.Vec3(-0.7, 5.5, 0));
+    const constraintL = new CANNON.PointToPointConstraint(
+        bodyBody, new CANNON.Vec3(-0.6, 0.5, 0), // 胴体の接続点
+        armLBody, new CANNON.Vec3(0, 0.4, 0)     // 腕の接続点
+    );
+    world.addConstraint(constraintL);
 
-        // --- Three.js の基本設定 ---
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x333333);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 5);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+    // 右腕、足も同様に createLimb と Constraint で追加...
+});
 
-        const controls = new OrbitControls(camera, renderer.domElement);
-        const light = new THREE.DirectionalLight(0xffffff, 1.5);
-        light.position.set(5, 10, 5);
-        light.castShadow = true;
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0x888888));
+// パーツ作成用関数（共通設定）
+function createLimb(mesh, pos) {
+    const b = new CANNON.Body({
+        mass: 1,
+        shape: new CANNON.Box(new CANNON.Vec3(0.2, 0.4, 0.2)),
+        position: pos,
+        collisionFilterGroup: GROUP_PLAYER,
+        collisionFilterMask: GROUP_OTHERS // 自分とはぶつからない
+    });
+    world.addBody(b);
+    return b;
+}
 
-        // 地面
-        const groundShape = new CANNON.Plane();
-        const groundBody = new CANNON.Body({ mass: 0 });
-        groundBody.addShape(groundShape);
-        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-        world.addBody(groundBody);
+// --- 3. スマホ・iPad操作（ジョイスティック） ---
+let moveVec = { x: 0, z: 0 };
 
-        const groundGeo = new THREE.PlaneGeometry(20, 20);
-        const groundMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
-        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
-        groundMesh.rotation.x = -Math.PI / 2;
-        groundMesh.receiveShadow = true;
-        scene.add(groundMesh);
+window.addEventListener('touchmove', (e) => {
+    // 指の動きをベクトルに変換（簡易版）
+    const touch = e.touches[0];
+    moveVec.x = (touch.clientX / window.innerWidth - 0.5) * 2;
+    moveVec.z = (touch.clientY / window.innerHeight - 0.5) * 2;
+}, { passive: false });
 
-        // --- モデル読み込みとパーツ連結 ---
-        const loader = new GLTFLoader();
-        const physicsBodies = []; // 描画用メッシュと物理ボディを紐付ける配列
+// --- 4. 更新ループ ---
+function animate() {
+    requestAnimationFrame(animate);
+    world.fixedStep();
 
-        loader.load('./Demo.glb', (gltf) => {
-            const model = gltf.scene;
-            scene.add(model);
-            document.getElementById('info').innerHTML = "読み込み成功！地面に落ちます。";
+    if (bodyBody) {
+        // 移動：倒した方向に力を加える
+        bodyBody.velocity.x = moveVec.x * 5;
+        bodyBody.velocity.z = moveVec.z * 5;
 
-            model.traverse((child) => {
-                if (child.isMesh) {
-                    // パーツごとに物理ボディを作成
-                    const box = new THREE.Box3().setFromObject(child);
-                    const size = new THREE.Vector3();
-                    box.getSize(size);
+        // 起き上がりこぼしの魔法：常に上を向かせる力を加える
+        const uprightPower = 10;
+        bodyBody.applyTorque(new CANNON.Vec3(
+            -bodyBody.quaternion.x * uprightPower,
+            0,
+            -bodyBody.quaternion.z * uprightPower
+        ));
 
-                    const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
-                    const body = new CANNON.Body({
-                        mass: child.name === "Body" ? 2 : 1, // 体を少し重く
-                        position: new CANNON.Vec3(child.worldPosition) // 初期位置
-                    });
-                    body.addShape(shape);
-                    world.addBody(body);
-
-                    physicsBodies.push({ mesh: child, body: body });
-                }
-            });
-        }, undefined, (error) => {
-            console.error("エラー発生:", error);
-            document.getElementById('info').innerHTML = "エラー: Demo.glb が見つからないか、読み込めません。";
-        });
-
-        // アニメーションループ
-        function animate() {
-            requestAnimationFrame(animate);
-            world.step(1/60); // 物理演算を1コマ進める
-
-            // 物理演算の結果を描画用メッシュに反映
-            physicsBodies.forEach(obj => {
-                obj.mesh.position.copy(obj.body.position);
-                obj.mesh.quaternion.copy(obj.body.quaternion);
-            });
-
-            renderer.render(scene, camera);
-        }
-        animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-    </script>
-</body>
-</html>
+        // メッシュの位置を物理ボディに合わせる
+        bodyMesh.position.copy(bodyBody.position);
+        bodyMesh.quaternion.copy(bodyBody.quaternion);
+        // ...他のパーツも同様に同期
+    }
+}
+animate();
