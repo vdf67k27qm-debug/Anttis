@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>銭闘 Ragdoll Fix</title>
+    <title>銭闘 Ragdoll Stable</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #f0f0f0; touch-action: none; }
         canvas { display: block; }
@@ -30,8 +30,7 @@ import * as CANNON from 'cannon-es';
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 4, 6);
-camera.lookAt(0, 1, 0);
+camera.position.set(0, 3, 5);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -44,16 +43,15 @@ light.castShadow = true;
 scene.add(light);
 scene.add(new THREE.AmbientLight(0x606060));
 
-// --- 物理ワールド (貫通対策版) ---
+// --- 物理ワールド ---
 const world = new CANNON.World();
-world.gravity.set(0, -15, 0); // 重力を少し強めてキビキビ動かす
-world.solver.iterations = 20; // 計算回数を増やして爆発を防ぐ
+world.gravity.set(0, -12, 0); 
+world.solver.iterations = 30; // 計算精度をさらにアップ
 
-// 地面を「厚みのある箱」にする (貫通防止のコツ)
-const groundShape = new CANNON.Box(new CANNON.Vec3(20, 1, 20)); 
+// 厚みのある地面（貫通防止）
 const groundBody = new CANNON.Body({ mass: 0 });
-groundBody.addShape(groundShape);
-groundBody.position.set(0, -1, 0); // 表面を0の高さにする
+groundBody.addShape(new CANNON.Box(new CANNON.Vec3(20, 1, 20)));
+groundBody.position.set(0, -1, 0);
 world.addBody(groundBody);
 
 const groundMesh = new THREE.Mesh(
@@ -69,31 +67,33 @@ const GROUP_PLAYER = 1;
 const GROUP_OTHERS = 2;
 
 const loader = new GLTFLoader();
-const parts = {}; // 物理ボディとメッシュを格納
+const parts = {};
 
 loader.load('Base.glb', (gltf) => {
     const model = gltf.scene;
     scene.add(model);
 
-    // 1. 胴体の作成 (Body)
+    // 1. 胴体 (Body) - 重心を少し下に設定
     const bodyM = model.getObjectByName('Body');
     const bodyB = new CANNON.Body({
         mass: 5,
-        position: new CANNON.Vec3(0, 3, 0),
-        shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.7, 0.4)),
+        position: new CANNON.Vec3(0, 4, 0),
+        shape: new CANNON.Box(new CANNON.Vec3(0.4, 0.6, 0.3)),
         collisionFilterGroup: GROUP_PLAYER,
         collisionFilterMask: GROUP_OTHERS,
-        angularDamping: 0.95
+        angularDamping: 0.99, // 勝手に回転するのを防ぐ
+        fixedRotation: false
     });
     world.addBody(bodyB);
     parts['Body'] = { mesh: bodyM, body: bodyB };
 
-    // 2. 他の全パーツをループで接続 (Arm_L, Arm_R, Leg_L, Leg_R)
+    // 2. 各パーツの設定 (初期位置を少し離すのがコツ)
     const configs = [
-        { name: 'Arm_L', pos: [-0.7, 0.5, 0], anchor: [0.6, 0.5, 0], size: [0.15, 0.4, 0.15] },
-        { name: 'Arm_R', pos: [0.7, 0.5, 0], anchor: [-0.6, 0.5, 0], size: [0.15, 0.4, 0.15] },
-        { name: 'Leg_L', pos: [-0.3, -0.7, 0], anchor: [0.3, -0.6, 0], size: [0.2, 0.3, 0.2] },
-        { name: 'Leg_R', pos: [0.3, -0.7, 0], anchor: [-0.3, -0.6, 0], size: [0.2, 0.3, 0.2] }
+        // name, 初期位置(x,y,z), 胴体側の接続点(x,y,z), パーツ側の接続点(x,y,z)
+        { name: 'Arm_L', start: [-1.5, 4.5, 0], anchorP: [-0.4, 0.5, 0], anchorC: [0, 0.4, 0] },
+        { name: 'Arm_R', start: [ 1.5, 4.5, 0], anchorP: [ 0.4, 0.5, 0], anchorC: [0, 0.4, 0] },
+        { name: 'Leg_L', start: [-0.8, 2.5, 0], anchorP: [-0.2, -0.6, 0], anchorC: [0, 0.3, 0] },
+        { name: 'Leg_R', start: [ 0.8, 2.5, 0], anchorP: [ 0.2, -0.6, 0], anchorC: [0, 0.3, 0] }
     ];
 
     configs.forEach(conf => {
@@ -102,24 +102,25 @@ loader.load('Base.glb', (gltf) => {
 
         const limbB = new CANNON.Body({
             mass: 1,
-            position: new CANNON.Vec3(conf.pos[0], 3 + conf.pos[1], conf.pos[2]),
-            shape: new CANNON.Box(new CANNON.Vec3(conf.size[0], conf.size[1], conf.size[2])),
+            position: new CANNON.Vec3(conf.start[0], conf.start[1], conf.start[2]),
+            shape: new CANNON.Box(new CANNON.Vec3(0.15, 0.3, 0.15)),
             collisionFilterGroup: GROUP_PLAYER,
-            collisionFilterMask: GROUP_OTHERS
+            collisionFilterMask: GROUP_OTHERS,
+            angularDamping: 0.9 // ブラブラしすぎ防止
         });
         world.addBody(limbB);
-        
-        // 胴体とパーツをバネのように繋ぐ
+
+        // PointToPointよりも安定する「スプリング的な接続」にするため、あえて少し遊びを持たせる
         const constraint = new CANNON.PointToPointConstraint(
-            bodyB, new CANNON.Vec3(-conf.pos[0], conf.pos[1], 0), 
-            limbB, new CANNON.Vec3(0, conf.size[1], 0)
+            bodyB, new CANNON.Vec3(conf.anchorP[0], conf.anchorP[1], conf.anchorP[2]),
+            limbB, new CANNON.Vec3(conf.anchorC[0], conf.anchorC[1], conf.anchorC[2])
         );
         world.addConstraint(constraint);
         parts[conf.name] = { mesh, body: limbB };
     });
 });
 
-// --- 操作系 ---
+// --- 操作・更新系 ---
 let joystick = { x: 0, z: 0 };
 window.addEventListener('touchmove', (e) => {
     const t = e.touches[0];
@@ -128,40 +129,35 @@ window.addEventListener('touchmove', (e) => {
 }, { passive: false });
 window.addEventListener('touchend', () => joystick = { x: 0, z: 0 });
 
-// --- ループ ---
 function animate() {
     requestAnimationFrame(animate);
     world.fixedStep();
 
-    Object.values(parts).forEach(p => {
+    // 全パーツ同期
+    for (let key in parts) {
+        const p = parts[key];
         p.mesh.position.copy(p.body.position);
         p.mesh.quaternion.copy(p.body.quaternion);
-    });
+    }
 
     if (parts['Body']) {
         const b = parts['Body'].body;
-        // 移動力
-        b.velocity.x = joystick.x * 6;
-        b.velocity.z = joystick.z * 6;
+        // 移動速度制限
+        b.velocity.x = joystick.x * 5;
+        b.velocity.z = joystick.z * 5;
+
+        // 起き上がりこぼし（超強力版）
+        const uprightPower = 80;
+        const rot = b.quaternion;
+        b.applyTorque(new CANNON.Vec3(-rot.x * uprightPower, 0, -rot.z * uprightPower));
         
-        // 起き上がり魔法 (Quaternionから直接姿勢を補正)
-        const uprightTorque = new CANNON.Vec3(
-            -b.quaternion.x * 50,
-            0,
-            -b.quaternion.z * 50
-        );
-        b.applyTorque(uprightTorque);
+        // 空中で回転してしまった場合の補正（y軸のねじれを直す）
+        b.angularVelocity.y *= 0.9;
     }
 
     renderer.render(scene, camera);
 }
 animate();
-
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
 </script>
 </body>
 </html>
