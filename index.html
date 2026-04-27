@@ -1,42 +1,100 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Anttis - 組み立てテスト</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">モデル読み込み中...<br>マウスで回転できます</div>
 
-const loader = new GLTFLoader();
-const character = new THREE.Group(); // 全パーツをまとめるグループ
-const bodyGroup = new THREE.Group(); // 股下を基準にするためのグループ
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/examples/jsm/loaders/GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+            "three/examples/jsm/controls/OrbitControls": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+        }
+    }
+    </script>
 
-// --- 設定：マス目単位の座標（ここを書き換えるだけで調整可能！） ---
-const GRID = {
-    legLength: 4,      // 足の長さ（地面から股下まで）
-    shoulder: { x: 5, y: 4, z: 0 }, // 股下から肩への距離
-    hip: { x: 2, y: 0, z: 0 }       // 股下から股関節への距離
-};
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
-// パーツ読み込み関数
-function loadPart(name, position, parent) {
-    loader.load(`./${name}.glb`, (gltf) => {
-        const model = gltf.scene;
-        // キャラクター視点の左右(X)を反映
-        model.position.set(position.x, position.y, position.z);
-        parent.add(model);
-    });
-}
+        // 1. 基本設定（シーン・カメラ・レンダラー）
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-// --- 組み立て実行 ---
+        // カメラ操作を可能にする
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(0, 15, 30);
+        controls.update();
 
-// 1. 胴体（股下を基準に配置）
-// ※ 胴体モデル自体の中心が原点なので、股下から上に y 分浮かす
-loadPart('Body', { x: 0, y: 0, z: 0 }, bodyGroup); 
+        // 2. 光源
+        const light = new THREE.DirectionalLight(0xffffff, 1.5);
+        light.position.set(5, 10, 7);
+        scene.add(light, new THREE.AmbientLight(0x404040, 2));
 
-// 2. 腕
-loadPart('Arm_R', { x: -GRID.shoulder.x, y: GRID.shoulder.y, z: GRID.shoulder.z }, bodyGroup);
-loadPart('Arm_L', { x:  GRID.shoulder.x, y: GRID.shoulder.y, z: GRID.shoulder.z }, bodyGroup);
+        // 地面（目安）
+        const grid = new THREE.GridHelper(20, 20);
+        scene.add(grid);
 
-// 3. 足
-loadPart('Leg_R', { x: -GRID.hip.x, y: GRID.hip.y, z: GRID.hip.z }, bodyGroup);
-loadPart('Leg_L', { x:  GRID.hip.x, y: GRID.hip.y, z: GRID.hip.z }, bodyGroup);
+        // 3. キャラクターの組み立て設定（マス目単位）
+        const GRID = {
+            legLength: 4,      // 足の長さ（地面から股下まで）
+            shoulder: { x: 5, y: 4, z: 0 }, 
+            hip: { x: 2.5, y: 0, z: 0 }     
+        };
 
-// 最後に全体を足の長さ分持ち上げて地面に立たせる
-bodyGroup.position.y = GRID.legLength;
-character.add(bodyGroup);
-scene.add(character);
+        const characterGroup = new THREE.Group();
+        const bodyGroup = new THREE.Group();
+        bodyGroup.position.y = GRID.legLength; // 股下を足の長さ分上げる
+        characterGroup.add(bodyGroup);
+        scene.add(characterGroup);
+
+        const loader = new GLTFLoader();
+
+        // パーツ読み込み関数
+        function loadPart(name, x, y, z) {
+            loader.load(`./${name}.glb`, (gltf) => {
+                const model = gltf.scene;
+                model.position.set(x, y, z);
+                bodyGroup.add(model);
+                document.getElementById('ui').innerHTML = name + " 読み込み完了";
+            }, undefined, (error) => {
+                console.error(name + " の読み込みに失敗:", error);
+            });
+        }
+
+        // --- 配置実行 ---
+        loadPart('Body',  0, 0, 0); 
+        loadPart('Arm_R', -GRID.shoulder.x, GRID.shoulder.y, GRID.shoulder.z);
+        loadPart('Arm_L',  GRID.shoulder.x, GRID.shoulder.y, GRID.shoulder.z);
+        loadPart('Leg_R', -GRID.hip.x,      GRID.hip.y,      GRID.hip.z);
+        loadPart('Leg_L',  GRID.hip.x,      GRID.hip.y,      GRID.hip.z);
+
+        // 4. ループ処理
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // 画面リサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
