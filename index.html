@@ -2,30 +2,47 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Anttis - サイズ調整テスト</title>
+    <title>Anttis - 右腕位置調整</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #333; }
         #ui { 
             position: absolute; top: 10px; left: 10px; color: white; 
-            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px;
-            font-family: sans-serif; line-height: 1.6;
+            background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px;
+            font-family: sans-serif; width: 250px;
         }
-        input[type="range"] { width: 200px; }
-        .val { font-family: monospace; color: #00ffcc; }
+        .control-group { margin-bottom: 10px; }
+        label { display: block; font-size: 12px; margin-bottom: 5px; }
+        input[type="range"] { width: 100%; }
+        .val { color: #00ffcc; float: right; font-family: monospace; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <b>一括サイズ調整 (Scale)</b><br>
-        <input type="range" id="scaleAll" min="0.01" max="2.0" step="0.01" value="1.0">
-        <span class="val" id="scaleVal">1.00</span><br>
-        <hr>
-        <b>股下からの位置 (マス目)</b><br>
-        足の長さ: <input type="number" id="legL" value="6.5" step="0.1" style="width:50px;"><br>
-        肩(X, Y): <input type="number" id="shX" value="5" step="0.1" style="width:40px;">, 
-                  <input type="number" id="shY" value="4" step="0.1" style="width:40px;"><br>
-        股(X): <input type="number" id="hipX" value="2.5" step="0.1" style="width:40px;"><br>
-        <p style="font-size: 12px;">※マウスドラッグで回転、ホイールでズーム</p>
+        <b>右腕（Arm_R）の位置調整</b><br><br>
+        
+        <div class="control-group">
+            <label>Scale (一括サイズ): <span class="val" id="v_scale">1.00</span></label>
+            <input type="range" id="scaleAll" min="0.01" max="1.0" step="0.01" value="0.1">
+        </div>
+
+        <div class="control-group">
+            <label>右腕 X (左右): <span class="val" id="v_armRX">0.00</span></label>
+            <input type="range" id="armRX" min="-20" max="20" step="0.1" value="-5.0">
+        </div>
+
+        <div class="control-group">
+            <label>右腕 Y (高さ): <span class="val" id="v_armRY">0.00</span></label>
+            <input type="range" id="armRY" min="-20" max="20" step="0.1" value="4.0">
+        </div>
+
+        <div class="control-group">
+            <label>右腕 Z (前後): <span class="val" id="v_armRZ">0.00</span></label>
+            <input type="range" id="armRZ" min="-10" max="10" step="0.1" value="0.0">
+        </div>
+
+        <p style="font-size: 11px; color: #aaa;">
+            ※右腕が胴体にピッタリつく数値をメモしてください。
+        </p>
     </div>
 
     <script type="importmap">
@@ -50,7 +67,7 @@
         document.body.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(0, 10, 20);
+        camera.position.set(10, 10, 15);
 
         const light = new THREE.DirectionalLight(0xffffff, 2);
         light.position.set(5, 10, 7);
@@ -75,30 +92,32 @@
 
         function update() {
             const s = parseFloat(document.getElementById('scaleAll').value);
-            document.getElementById('scaleVal').innerText = s.toFixed(2);
+            const rx = parseFloat(document.getElementById('armRX').value);
+            const ry = parseFloat(document.getElementById('armRY').value);
+            const rz = parseFloat(document.getElementById('armRZ').value);
 
-            const legL = parseFloat(document.getElementById('legL').value);
-            const shX = parseFloat(document.getElementById('shX').value);
-            const shY = parseFloat(document.getElementById('shY').value);
-            const hipX = parseFloat(document.getElementById('hipX').value);
+            // UIの数値表示更新
+            document.getElementById('v_scale').innerText = s.toFixed(2);
+            document.getElementById('v_armRX').innerText = rx.toFixed(1);
+            document.getElementById('v_armRY').innerText = ry.toFixed(1);
+            document.getElementById('v_armRZ').innerText = rz.toFixed(1);
 
-            bodyGroup.position.y = legL; // 全体を浮かす
-
-            // 各パーツにサイズと位置を適用
             Object.keys(parts).forEach(name => {
                 const p = parts[name];
-                p.scale.set(s, s, s); // 全パーツ一括サイズ変更
+                p.scale.set(s, s, s);
 
-                // 位置の適用（計算にスケールを掛け合わせるのがコツ！）
-                if(name === 'Body') p.position.set(0, 0, 0);
-                if(name === 'Arm_R') p.position.set(-shX * s, shY * s, 0);
-                if(name === 'Arm_L') p.position.set( shX * s, shY * s, 0);
-                if(name === 'Leg_R') p.position.set(-hipX * s, 0, 0);
-                if(name === 'Leg_L') p.position.set( hipX * s, 0, 0);
+                // 右腕だけスライダーの値で動かす
+                if(name === 'Arm_R') {
+                    p.position.set(rx, ry, rz);
+                } else if (name === 'Body') {
+                    p.position.set(0, 0, 0);
+                } else {
+                    // 他のパーツは一旦非表示にするか、端に寄せておくと調整しやすいです
+                    // p.visible = false; 
+                }
             });
         }
 
-        // 全ての入力にイベントを設定
         document.querySelectorAll('input').forEach(el => el.addEventListener('input', update));
 
         function animate() {
