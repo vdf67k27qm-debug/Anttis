@@ -3,28 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Mobile Test</title>
+    <title>Snail Adventure - Natural Walk</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; font-family: sans-serif; pointer-events: none; font-size: 12px; }
-        /* ジョイスティックの見た目 */
-        #joystick-base { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; display: block; }
-        #joystick-stick { position: absolute; top: 25px; left: 25px; width: 50px; height: 50px; background: rgba(255,255,255,0.5); border-radius: 50%; }
+        #joystick-base { position: absolute; bottom: 50px; left: 50px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; }
+        #joystick-stick { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; background: rgba(255,255,255,0.4); border-radius: 50%; }
     </style>
 </head>
 <body>
-    <div id="ui">画面左下をドラッグして移動</div>
-    
-    <div id="joystick-base">
-        <div id="joystick-stick"></div>
-    </div>
+    <div id="joystick-base"><div id="joystick-stick"></div></div>
 
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/examples/jsm/loaders/GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
-            "three/examples/jsm/controls/OrbitControls": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+            "three/examples/jsm/loaders/GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
         }
     }
     </script>
@@ -32,7 +25,6 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -40,13 +32,15 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(0, 5, 12);
+        const light = new THREE.DirectionalLight(0xffffff, 3);
+        light.position.set(5, 10, 7);
+        scene.add(light, new THREE.AmbientLight(0x404040, 2));
+        scene.add(new THREE.GridHelper(100, 100, 0x444444, 0x222222));
 
-        scene.add(new THREE.AmbientLight(0xffffff, 3));
-        scene.add(new THREE.GridHelper(100, 100, 0x666666, 0x333333));
+        camera.position.set(0, 6, 12);
+        camera.lookAt(0, 0, 0);
 
-        // --- 記録した黄金の数値 ---
+        // --- 確定済み数値 ---
         const S = 0.5;
         const POS = {
             Arm_R: { x: -0.25, y: -0.15 }, Arm_L: { x: 0.25, y: -0.15 },
@@ -58,9 +52,7 @@
 
         const loader = new GLTFLoader();
         const parts = {};
-        const fileNames = ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
-
-        fileNames.forEach(name => {
+        ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'].forEach(name => {
             loader.load(`./${name}.glb`, (gltf) => {
                 const model = gltf.scene;
                 model.scale.set(S, S, S);
@@ -70,63 +62,75 @@
             });
         });
 
-        // --- ジョイスティックのロジック ---
-        let moveX = 0, moveZ = 0, isMoving = false;
+        // --- ジョイスティック ---
+        let moveX = 0, moveZ = 0, inputPower = 0;
         const base = document.getElementById('joystick-base');
         const stick = document.getElementById('joystick-stick');
-        const baseRect = base.getBoundingClientRect();
-        const centerX = baseRect.left + baseRect.width / 2;
-        const centerY = baseRect.top + baseRect.height / 2;
+        
+        const handleTouch = (e) => {
+            const touch = e.touches[0];
+            const rect = base.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 60);
+            const angle = Math.atan2(dy, dx);
+            
+            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+            
+            inputPower = dist / 60;
+            moveX = Math.cos(angle) * inputPower * 0.12;
+            moveZ = Math.sin(angle) * inputPower * 0.12;
+        };
 
         window.addEventListener('touchstart', handleTouch);
         window.addEventListener('touchmove', handleTouch);
         window.addEventListener('touchend', () => {
-            stick.style.transform = `translate(0px, 0px)`;
-            moveX = 0; moveZ = 0; isMoving = false;
+            stick.style.transform = `translate(0,0)`;
+            moveX = 0; moveZ = 0; inputPower = 0;
         });
 
-        function handleTouch(e) {
-            const touch = e.touches[0];
-            if (touch.clientX < window.innerWidth / 2) { // 画面左側のみ反応
-                let dx = touch.clientX - centerX;
-                let dy = touch.clientY - centerY;
-                const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
-                const angle = Math.atan2(dy, dx);
-                
-                const tx = Math.cos(angle) * dist;
-                const ty = Math.sin(angle) * dist;
-                stick.style.transform = `translate(${tx}px, ${ty}px)`;
-
-                moveX = (dx / 50) * 0.15;
-                moveZ = (dy / 50) * 0.15;
-                isMoving = true;
-            }
-        }
-
-        let clock = new THREE.Clock();
-
+        let walkTime = 0;
         function animate() {
             requestAnimationFrame(animate);
-            const delta = clock.getElapsedTime();
-
-            if (isMoving && parts['Leg_R']) {
+            
+            if (inputPower > 0.1 && parts['Leg_R']) {
+                // 移動と向き（反転を修正：+Math.PIを追加）
                 playerGroup.position.x += moveX;
                 playerGroup.position.z += moveZ;
-                
-                // 進む方向に向きを変える
-                playerGroup.rotation.y = Math.atan2(-moveX, -moveZ);
+                playerGroup.rotation.y = Math.atan2(-moveX, -moveZ) + Math.PI;
 
-                // アニメーション
-                const walkSpeed = 12;
-                parts['Leg_R'].rotation.x = Math.sin(delta * walkSpeed) * 0.6;
-                parts['Leg_L'].rotation.x = Math.sin(delta * walkSpeed + Math.PI) * 0.6;
-                parts['Arm_R'].rotation.x = Math.sin(delta * walkSpeed + Math.PI) * 0.6;
-                parts['Arm_L'].rotation.x = Math.sin(delta * walkSpeed) * 0.6;
+                // 自然な歩行モーション
+                walkTime += inputPower * 0.2; 
+                const swing = Math.sin(walkTime * 10);
+                const lift = Math.max(0, Math.cos(walkTime * 10)) * 0.2; // 足を上げる動き
+
+                // 足の前後 + 上下運動（スライド感を減らす）
+                parts['Leg_R'].rotation.x = swing * 0.7;
+                parts['Leg_R'].position.y = POS.Leg_R.y + (swing < 0 ? lift : 0);
+                
+                parts['Leg_L'].rotation.x = -swing * 0.7;
+                parts['Leg_L'].position.y = POS.Leg_L.y + (swing > 0 ? lift : 0);
+
+                // 腕の振り
+                parts['Arm_R'].rotation.x = -swing * 0.5;
+                parts['Arm_L'].rotation.x = swing * 0.5;
+                
+                // 体の上下の揺れ（ピコピコ動く感じ）
+                playerGroup.position.y = Math.abs(swing) * 0.05;
             } else if (parts['Leg_R']) {
-                parts['Leg_R'].rotation.x = 0; parts['Leg_L'].rotation.x = 0;
+                // 停止時はリセット
+                ['Leg_R', 'Leg_L', 'Arm_R', 'Arm_L'].forEach(p => parts[p].rotation.x = 0);
+                parts['Leg_R'].position.y = POS.Leg_R.y;
+                parts['Leg_L'].position.y = POS.Leg_L.y;
+                playerGroup.position.y = 0;
             }
 
-            controls.update();
+            // カメラがプレイヤーを追従
+            camera.position.set(playerGroup.position.x, playerGroup.position.y + 6, playerGroup.position.z + 12);
+            camera.lookAt(playerGroup.position);
+
             renderer.render(scene, camera);
         }
         animate();
