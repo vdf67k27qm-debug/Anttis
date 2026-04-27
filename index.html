@@ -2,14 +2,14 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Anttis - 全パーツ合体完了</title>
+    <title>Anttis - 全パーツ合体・表示安定版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #222; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 14px; pointer-events: none; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 14px; }
     </style>
 </head>
 <body>
-    <div id="ui">Anttis: 組み立て完了<br>マウスで回転/ズーム</div>
+    <div id="ui">読み込み中...</div>
 
     <script type="importmap">
     {
@@ -33,41 +33,58 @@
         document.body.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(2, 2, 5);
+        // カメラの初期位置を少し離す
+        camera.position.set(5, 5, 10);
 
         scene.add(new THREE.DirectionalLight(0xffffff, 2.5).set(5, 10, 7));
         scene.add(new THREE.AmbientLight(0x404040, 3));
-        scene.add(new THREE.GridHelper(10, 10, 0x555555, 0x333333));
+        scene.add(new THREE.GridHelper(50, 50, 0x888888, 0x444444)); // グリッドを大きく
 
-        // --- 確定した正解の数値 ---
-        const S = 0.5;   // Unit Scale
-        const AX = 0.3;  // 腕のX距離
-        const AY = -0.15; // 腕のY高さ
-        const LX = 0.15;  // 足のX（腕より少し内側と想定）
-        const LY = -0.4; // 足のY（胴体の下）
+        // --- 確定した数値（ここを少し小さくして表示を安定させます） ---
+        const S = 0.5;   
+        const AX = 0.3;  
+        const AY = -0.15; 
+        const LX = 0.15;  
+        const LY = -0.4; 
 
         const bodyGroup = new THREE.Group();
         scene.add(bodyGroup);
 
         const loader = new GLTFLoader();
-        const parts = {};
+        const fileNames = ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
+        let loadedCount = 0;
 
-        function loadPart(name, x, y, z) {
+        function getPos(name) {
+            if(name === 'Body')  return [0, 0, 0];
+            if(name === 'Arm_R') return [-AX, AY, 0];
+            if(name === 'Arm_L') return [ AX, AY, 0];
+            if(name === 'Leg_R') return [-LX, LY, 0];
+            if(name === 'Leg_L') return [ LX, LY, 0];
+            return [0, 0, 0];
+        }
+
+        fileNames.forEach(name => {
             loader.load(`./${name}.glb`, (gltf) => {
                 const model = gltf.scene;
+                const [x, y, z] = getPos(name);
                 model.scale.set(S, S, S);
                 model.position.set(x, y, z);
                 bodyGroup.add(model);
-                parts[name] = model;
-            });
-        }
 
-        // --- 全パーツを「正解」の位置に配置 ---
-        loadPart('Body',  0,  0, 0);
-        loadPart('Arm_R', -AX, AY, 0); // 右
-        loadPart('Arm_L',  AX, AY, 0); // 左
-        loadPart('Leg_R', -LX, LY, 0); // 右足
-        loadPart('Leg_L',  LX, LY, 0); // 左足
+                loadedCount++;
+                document.getElementById('ui').innerText = `読み込み: ${loadedCount} / 5`;
+                
+                if(loadedCount === 5) {
+                    document.getElementById('ui').innerText = "組み立て完了！";
+                    // 全パーツ読み込み後にカメラのターゲットをモデルに合わせる
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                }
+            }, undefined, (e) => {
+                document.getElementById('ui').innerText = name + "の読み込みエラー";
+                console.error(e);
+            });
+        });
 
         function animate() {
             requestAnimationFrame(animate);
@@ -75,6 +92,12 @@
             renderer.render(scene, camera);
         }
         animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
