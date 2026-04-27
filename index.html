@@ -2,14 +2,14 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Anttis - 全パーツ合体・表示安定版</title>
+    <title>Anttis - 緊急表示テスト</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #222; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 14px; }
+        body { margin: 0; background-color: #111; overflow: hidden; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #f00; background: white; padding: 10px; z-index: 100; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="ui">読み込み中...</div>
+    <div id="ui">確認中...</div>
 
     <script type="importmap">
     {
@@ -27,62 +27,39 @@
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 2000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
+        // カメラを思いっきり引いた位置に
+        camera.position.set(0, 5, 20);
         const controls = new OrbitControls(camera, renderer.domElement);
-        // カメラの初期位置を少し離す
-        camera.position.set(5, 5, 10);
 
-        scene.add(new THREE.DirectionalLight(0xffffff, 2.5).set(5, 10, 7));
-        scene.add(new THREE.AmbientLight(0x404040, 3));
-        scene.add(new THREE.GridHelper(50, 50, 0x888888, 0x444444)); // グリッドを大きく
-
-        // --- 確定した数値（ここを少し小さくして表示を安定させます） ---
-        const S = 0.5;   
-        const AX = 0.3;  
-        const AY = -0.15; 
-        const LX = 0.15;  
-        const LY = -0.4; 
-
-        const bodyGroup = new THREE.Group();
-        scene.add(bodyGroup);
+        scene.add(new THREE.AmbientLight(0xffffff, 3)); 
+        scene.add(new THREE.GridHelper(100, 100, 0xffffff, 0x333333));
 
         const loader = new GLTFLoader();
-        const fileNames = ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
-        let loadedCount = 0;
+        // GitHubにアップロードされている正確なファイル名を確認してください
+        const parts = ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
+        let count = 0;
 
-        function getPos(name) {
-            if(name === 'Body')  return [0, 0, 0];
-            if(name === 'Arm_R') return [-AX, AY, 0];
-            if(name === 'Arm_L') return [ AX, AY, 0];
-            if(name === 'Leg_R') return [-LX, LY, 0];
-            if(name === 'Leg_L') return [ LX, LY, 0];
-            return [0, 0, 0];
-        }
-
-        fileNames.forEach(name => {
+        parts.forEach(name => {
             loader.load(`./${name}.glb`, (gltf) => {
                 const model = gltf.scene;
-                const [x, y, z] = getPos(name);
-                model.scale.set(S, S, S);
-                model.position.set(x, y, z);
-                bodyGroup.add(model);
-
-                loadedCount++;
-                document.getElementById('ui').innerText = `読み込み: ${loadedCount} / 5`;
+                // さっきのスクショの正解に近い設定
+                model.scale.set(0.5, 0.5, 0.5); 
                 
-                if(loadedCount === 5) {
-                    document.getElementById('ui').innerText = "組み立て完了！";
-                    // 全パーツ読み込み後にカメラのターゲットをモデルに合わせる
-                    controls.target.set(0, 0, 0);
-                    controls.update();
-                }
-            }, undefined, (e) => {
-                document.getElementById('ui').innerText = name + "の読み込みエラー";
-                console.error(e);
+                // 全パーツをあえて「原点」に重ねて表示（これで映るか確認）
+                model.position.set(0, 0, 0); 
+                scene.add(model);
+
+                count++;
+                document.getElementById('ui').innerText = `成功: ${count}/5`;
+                document.getElementById('ui').style.color = "blue";
+            }, undefined, (err) => {
+                document.getElementById('ui').innerText = `${name}が読み込めません！`;
+                console.error(err);
             });
         });
 
@@ -92,12 +69,6 @@
             renderer.render(scene, camera);
         }
         animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
