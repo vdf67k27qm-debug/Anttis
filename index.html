@@ -2,139 +2,66 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ふにゃふにゃ銭闘</title>
+    <title>Display Test</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #333; touch-action: none; }
+        body { margin: 0; background-color: #222; color: white; }
         canvas { display: block; }
+        #debug { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; font-family: monospace; }
     </style>
 </head>
 <body>
+    <div id="debug">状態: 準備中...</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-<script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 
-<script>
-    // --- 1. 基本設定（物理は使いません） ---
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb);
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 3, 6); // 少し引いて全体を見る
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true; // 影はリッチに
-    document.body.appendChild(renderer.domElement);
-
-    // 光源
-    const light = new THREE.DirectionalLight(0xffffff, 1.2);
-    light.position.set(5, 10, 5);
-    light.castShadow = true;
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0x707070));
-
-    // 地面（Three.jsの床）
-    const groundMesh = new THREE.Mesh(
-        new THREE.CircleGeometry(20, 32),
-        new THREE.MeshStandardMaterial({ color: 0x44aa44 })
-    );
-    groundMesh.rotation.x = -Math.PI / 2;
-    groundMesh.receiveShadow = true;
-    scene.add(groundMesh);
-
-    // --- 2. キャラクター（Base.glb） ---
-    let playerGroup = new THREE.Group(); // キャラ全体をまとめるグループ
-    scene.add(playerGroup);
-    const parts = {};
-    const loader = new THREE.GLTFLoader();
-
-    loader.load('Base.glb', (gltf) => {
-        const model = gltf.scene;
-        playerGroup.add(model); // グループに入れる
-
-        // 各パーツの参照を取得
-        const partNames = ['Body', 'Arm_L', 'Arm_R', 'Leg_L', 'Leg_R'];
-        partNames.forEach(name => {
-            const p = model.getObjectByName(name);
-            if (p) {
-                parts[name] = p;
-                p.castShadow = true;
-                // サイン波アニメーションのための初期角度を保存
-                p.userData.initRot = p.rotation.clone();
-            }
-        });
-        // 最初からキャラを表示させるために少し浮かせる
-        playerGroup.position.y = 1;
-        console.log("モデル読み込み成功");
-    }, undefined, (error) => {
-        console.error("モデル読み込みエラー:", error);
-    });
-
-    // --- 3. 操作 ---
-    let move = { x: 0, z: 0 };
-    window.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        move.originX = t.clientX;
-        move.originZ = t.clientY;
-    });
-    window.addEventListener('touchmove', (e) => {
-        const t = e.touches[0];
-        // 画面のドラッグ量を移動量にする
-        move.x = (t.clientX - move.originX) * 0.02;
-        move.z = (t.clientY - move.originZ) * 0.02;
-    });
-    window.addEventListener('touchend', () => move = { x: 0, z: 0 });
-
-    // --- 4. アニメーションループ ---
-    let clock = new THREE.Clock(); // 時間を測る
-
-    function animate() {
-        requestAnimationFrame(animate);
+    <script>
+        const debug = document.getElementById('debug');
         
-        let t = clock.getElapsedTime(); // 経過時間（秒）
-        let speed = move.x !== 0 || move.z !== 0 ? 1 : 0; // 移動中かどうか
+        // --- 1. シーン作成 ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 5);
 
-        if (parts['Body']) {
-            // キャラ全体の移動
-            playerGroup.position.x += move.x;
-            playerGroup.position.z += move.z;
-
-            // --- 【ふにゃふにゃアニメーションの核心】 ---
-            // 止まっている時: ゆったり呼吸（上下に揺らす）
-            // 移動中: 激しく揺らす
-            let wobble = Math.sin(t * 5) * 0.1;
-            let moveWobble = Math.sin(t * 10) * 0.3 * speed;
-            
-            // 胴体を少し傾ける（移動方向に合わせて）
-            playerGroup.rotation.z = -move.x * 0.3;
-            playerGroup.rotation.x = move.z * 0.3;
-
-            // 腕：常にゆらゆら（移動中は大きく）
-            parts['Arm_L'].rotation.x = parts['Arm_L'].userData.initRot.x + (Math.sin(t * 3) * 0.2 + moveWobble);
-            parts['Arm_R'].rotation.x = parts['Arm_R'].userData.initRot.x + (Math.sin(t * 3 + 1) * 0.2 - moveWobble);
-
-            // 足：交互に（歩いてる風に）
-            parts['Leg_L'].rotation.x = parts['Leg_L'].userData.initRot.x + Math.sin(t * 10) * 0.5 * speed;
-            parts['Leg_R'].rotation.x = parts['Leg_R'].userData.initRot.x - Math.sin(t * 10) * 0.5 * speed;
-
-            // 胴体を上下させて「柔らかさ」を出す
-            model = playerGroup.children[0];
-            model.position.y = (wobble + Math.abs(moveWobble));
-
-            // 地面貫通防止（物理エンジンがないので、yを強制固定するだけ！）
-            if (playerGroup.position.y < 1) playerGroup.position.y = 1;
-        }
-
-        renderer.render(scene, camera);
-    }
-    animate();
-
-    // 画面リサイズ
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-</script>
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 2));
+
+        // --- 2. モデル読み込み ---
+        const loader = new THREE.GLTFLoader();
+        
+        debug.innerText = "状態: Base.glb を読み込み中...";
+
+        loader.load('Base.glb', 
+            (gltf) => {
+                scene.add(gltf.scene);
+                debug.innerText = "状態: 読み込み成功！表示中";
+                console.log("Success", gltf);
+            },
+            (xhr) => {
+                const percent = (xhr.loaded / xhr.total * 100);
+                if(percent > 0) debug.innerText = "状態: ダウンロード中 " + Math.round(percent) + "%";
+            },
+            (error) => {
+                debug.style.color = "red";
+                debug.innerText = "状態: エラー発生！\n" + error.message + "\n\n※ファイル名が大文字の 'Base.glb' か、index.htmlと同じ場所にあるか確認してください。";
+            }
+        );
+
+        // --- 3. ループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
