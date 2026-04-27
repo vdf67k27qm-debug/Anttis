@@ -1,67 +1,73 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Display Test</title>
+    <title>Load Check</title>
     <style>
-        body { margin: 0; background-color: #222; color: white; }
-        canvas { display: block; }
-        #debug { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; font-family: monospace; }
+        body { margin: 0; background: #111; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { white-space: pre-wrap; line-height: 1.5; }
     </style>
 </head>
 <body>
-    <div id="debug">状態: 準備中...</div>
+    <div id="log">【ログ開始】</div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
-
-    <script>
-        const debug = document.getElementById('debug');
-        
-        // --- 1. シーン作成 ---
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 5);
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        scene.add(new THREE.AmbientLight(0xffffff, 2));
-
-        // --- 2. モデル読み込み ---
-        const loader = new THREE.GLTFLoader();
-        
-        debug.innerText = "状態: Base.glb を読み込み中...";
-
-        loader.load('Base.glb', 
-            (gltf) => {
-                scene.add(gltf.scene);
-                debug.innerText = "状態: 読み込み成功！表示中";
-                console.log("Success", gltf);
-            },
-            (xhr) => {
-                const percent = (xhr.loaded / xhr.total * 100);
-                if(percent > 0) debug.innerText = "状態: ダウンロード中 " + Math.round(percent) + "%";
-            },
-            (error) => {
-                debug.style.color = "red";
-                debug.innerText = "状態: エラー発生！\n" + error.message + "\n\n※ファイル名が大文字の 'Base.glb' か、index.htmlと同じ場所にあるか確認してください。";
-            }
-        );
-
-        // --- 3. ループ ---
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
-        animate();
+    }
+    </script>
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        const logElement = document.getElementById('log');
+        function logger(msg) {
+            logElement.innerText += "\n" + msg;
+            console.log(msg);
+        }
+
+        try {
+            logger("1. Three.js 起動...");
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+            document.body.appendChild(renderer.domElement);
+            
+            scene.add(new THREE.AmbientLight(0xffffff, 2));
+            camera.position.z = 3;
+
+            logger("2. Base.glb 読み込み開始...");
+            const loader = new GLTFLoader();
+
+            loader.load('./Base.glb', 
+                (gltf) => {
+                    logger("✅ 成功！モデルを表示します。");
+                    scene.add(gltf.scene);
+                },
+                (xhr) => {
+                    const p = (xhr.loaded / xhr.total * 100);
+                    if(p > 0) logger(`...通信中: ${Math.round(p)}%`);
+                },
+                (err) => {
+                    logger("❌ エラー発生！原因: " + err.message);
+                }
+            );
+
+            function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            }
+            animate();
+
+        } catch (e) {
+            logger("⚠️ 致命的エラー: " + e.message);
+        }
     </script>
 </body>
 </html>
