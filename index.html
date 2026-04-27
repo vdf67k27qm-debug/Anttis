@@ -2,14 +2,36 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Anttis - パーツ分離成功版</title>
+    <title>Anttis - 最終座標調整</title>
     <style>
-        body { margin: 0; background-color: #222; overflow: hidden; }
-        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; font-family: monospace; }
+        body { margin: 0; overflow: hidden; background-color: #222; }
+        #ui { 
+            position: absolute; top: 10px; left: 10px; color: #00ffcc; 
+            background: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px;
+            font-family: monospace; font-size: 12px; width: 300px;
+            max-height: 90vh; overflow-y: auto;
+        }
+        .part-box { border-bottom: 1px solid #444; margin-bottom: 10px; padding-bottom: 10px; }
+        .row { display: flex; align-items: center; justify-content: space-between; margin: 4px 0; }
+        input[type="range"] { flex: 1; margin: 0 8px; }
+        input[type="number"] { width: 55px; background: #000; color: #00ffcc; border: 1px solid #555; }
+        h3 { margin: 0 0 8px 0; color: #fff; font-size: 14px; }
     </style>
 </head>
 <body>
-    <div id="ui">読み込み中...</div>
+    <div id="ui">
+        <h2 style="font-size:16px; margin:0 0 10px 0;">全パーツ位置調整</h2>
+        
+        <div class="part-box">
+            <h3>Scale (全体共通)</h3>
+            <div class="row">
+                <input type="range" id="s_all" min="0.1" max="1.5" step="0.01" value="0.5">
+                <input type="number" id="n_all" value="0.5" step="0.01">
+            </div>
+        </div>
+
+        <div id="controls-container"></div>
+    </div>
 
     <script type="importmap">
     {
@@ -33,38 +55,71 @@
         document.body.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(0, 2, 5); // キャラクターの正面近くに配置
+        camera.position.set(0, 2, 8);
 
         scene.add(new THREE.AmbientLight(0xffffff, 3));
         scene.add(new THREE.GridHelper(20, 20, 0x888888, 0x444444));
 
         const loader = new GLTFLoader();
+        const parts = {};
+        const names = ['Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
         
-        // --- あなたが調整した「正解」の数値 ---
-        const S = 0.5;    // Scale
-        const AX = 0.3;   // 右腕のX（絶対値）
-        const AY = -0.15; // 右腕のY
+        // 初期座標設定 (あなたの現在の値をベースに)
+        const config = {
+            Arm_R: { x: -0.3, y: -0.15, z: 0 },
+            Arm_L: { x: 0.3, y: -0.15, z: 0 },
+            Leg_R: { x: -0.15, y: -0.4, z: 0 },
+            Leg_L: { x: 0.15, y: -0.4, z: 0 }
+        };
 
-        const fileNames = ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'];
-        let count = 0;
+        // UIの自動生成
+        const container = document.getElementById('controls-container');
+        names.forEach(name => {
+            const html = `
+                <div class="part-box">
+                    <h3>${name}</h3>
+                    <div class="row">X <input type="range" id="s_${name}_x" min="-2" max="2" step="0.01" value="${config[name].x}"><input type="number" id="n_${name}_x" value="${config[name].x}" step="0.01"></div>
+                    <div class="row">Y <input type="range" id="s_${name}_y" min="-2" max="2" step="0.01" value="${config[name].y}"><input type="number" id="n_${name}_y" value="${config[name].y}" step="0.01"></div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', html);
+        });
 
-        fileNames.forEach(name => {
+        function loadPart(name) {
             loader.load(`./${name}.glb`, (gltf) => {
-                const model = gltf.scene;
-                model.scale.set(S, S, S);
+                parts[name] = gltf.scene;
+                scene.add(parts[name]);
+                update();
+            });
+        }
 
-                // 各パーツを「埋まらない位置」に配置
-                if(name === 'Body')  model.position.set(0, 0, 0);
-                if(name === 'Arm_R') model.position.set(-AX, AY, 0);
-                if(name === 'Arm_L') model.position.set( AX, AY, 0);
-                
-                // 足は腕より少し内側、かつ胴体の下
-                if(name === 'Leg_R') model.position.set(-0.15, -0.4, 0);
-                if(name === 'Leg_L') model.position.set( 0.15, -0.4, 0);
+        // 胴体は固定
+        loader.load('./Body.glb', (gltf) => {
+            parts['Body'] = gltf.scene;
+            scene.add(parts['Body']);
+            update();
+        });
+        names.forEach(loadPart);
 
-                scene.add(model);
-                count++;
-                document.getElementById('ui').innerText = `合体完了: ${count}/5`;
+        function update() {
+            const sAll = parseFloat(document.getElementById('n_all').value);
+            
+            Object.keys(parts).forEach(name => {
+                parts[name].scale.set(sAll, sAll, sAll);
+                if(name !== 'Body') {
+                    const x = parseFloat(document.getElementById(`n_${name}_x`).value);
+                    const y = parseFloat(document.getElementById(`n_${name}_y`).value);
+                    parts[name].position.set(x, y, 0);
+                }
+            });
+        }
+
+        // イベント登録
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('input', (e) => {
+                const targetId = e.target.id.replace('s_', 'n_').replace('n_', 's_');
+                document.getElementById(targetId).value = e.target.value;
+                update();
             });
         });
 
