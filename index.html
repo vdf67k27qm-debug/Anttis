@@ -2,18 +2,19 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Anttis - 右腕位置調整</title>
+    <title>Anttis - 精密座標調整</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #333; }
         #ui { 
             position: absolute; top: 10px; left: 10px; color: white; 
             background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px;
-            font-family: sans-serif; width: 250px;
+            font-family: sans-serif; width: 280px; font-size: 13px;
         }
-        .control-group { margin-bottom: 10px; }
-        label { display: block; font-size: 12px; margin-bottom: 5px; }
-        input[type="range"] { width: 100%; }
-        .val { color: #00ffcc; float: right; font-family: monospace; }
+        .control-group { margin-bottom: 12px; border-bottom: 1px solid #444; padding-bottom: 8px; }
+        .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        input[type="range"] { flex: 1; margin-right: 10px; }
+        input[type="number"] { width: 60px; background: #222; color: #00ffcc; border: 1px solid #444; padding: 2px; }
+        label { font-weight: bold; color: #aaa; }
     </style>
 </head>
 <body>
@@ -21,28 +22,41 @@
         <b>右腕（Arm_R）の位置調整</b><br><br>
         
         <div class="control-group">
-            <label>Scale (一括サイズ): <span class="val" id="v_scale">1.00</span></label>
-            <input type="range" id="scaleAll" min="0.01" max="1.0" step="0.01" value="0.1">
+            <label>1マスの大きさ (Unit Scale)</label>
+            <div class="row">
+                <input type="range" id="s_u" min="0.001" max="0.5" step="0.001" value="0.1">
+                <input type="number" id="n_u" step="0.001" value="0.1">
+            </div>
         </div>
 
         <div class="control-group">
-            <label>右腕 X (左右): <span class="val" id="v_armRX">0.00</span></label>
-            <input type="range" id="armRX" min="-20" max="20" step="0.1" value="-5.0">
+            <label>右腕 X (左右)</label>
+            <div class="row">
+                <input type="range" id="s_rx" min="-10" max="10" step="0.05" value="-0.5">
+                <input type="number" id="n_rx" step="0.01" value="-0.5">
+            </div>
         </div>
 
         <div class="control-group">
-            <label>右腕 Y (高さ): <span class="val" id="v_armRY">0.00</span></label>
-            <input type="range" id="armRY" min="-20" max="20" step="0.1" value="4.0">
+            <label>右腕 Y (高さ)</label>
+            <div class="row">
+                <input type="range" id="s_ry" min="-10" max="10" step="0.05" value="0.4">
+                <input type="number" id="n_ry" step="0.01" value="0.4">
+            </div>
         </div>
 
         <div class="control-group">
-            <label>右腕 Z (前後): <span class="val" id="v_armRZ">0.00</span></label>
-            <input type="range" id="armRZ" min="-10" max="10" step="0.1" value="0.0">
+            <label>右腕 Z (前後)</label>
+            <div class="row">
+                <input type="range" id="s_rz" min="-10" max="10" step="0.05" value="0">
+                <input type="number" id="n_rz" step="0.01" value="0">
+            </div>
         </div>
 
-        <p style="font-size: 11px; color: #aaa;">
-            ※右腕が胴体にピッタリつく数値をメモしてください。
-        </p>
+        <div style="font-size: 11px; color: #888;">
+            ※スライダーでも直接入力でも動きます。<br>
+            ※マウスで視点を変えて確認してください。
+        </div>
     </div>
 
     <script type="importmap">
@@ -67,12 +81,12 @@
         document.body.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(10, 10, 15);
+        camera.position.set(5, 5, 10);
 
         const light = new THREE.DirectionalLight(0xffffff, 2);
         light.position.set(5, 10, 7);
-        scene.add(light, new THREE.AmbientLight(0x404040, 2));
-        scene.add(new THREE.GridHelper(20, 20));
+        scene.add(light, new THREE.AmbientLight(0x404040, 2.5));
+        scene.add(new THREE.GridHelper(20, 20, 0x888888, 0x444444));
 
         const bodyGroup = new THREE.Group();
         scene.add(bodyGroup);
@@ -90,35 +104,39 @@
 
         ['Body', 'Arm_R', 'Arm_L', 'Leg_R', 'Leg_L'].forEach(loadPart);
 
-        function update() {
-            const s = parseFloat(document.getElementById('scaleAll').value);
-            const rx = parseFloat(document.getElementById('armRX').value);
-            const ry = parseFloat(document.getElementById('armRY').value);
-            const rz = parseFloat(document.getElementById('armRZ').value);
+        // スライダーと数値を同期させる関数
+        function sync(id1, id2) {
+            const el1 = document.getElementById(id1);
+            const el2 = document.getElementById(id2);
+            el1.addEventListener('input', () => { el2.value = el1.value; update(); });
+            el2.addEventListener('input', () => { el1.value = el2.value; update(); });
+        }
 
-            // UIの数値表示更新
-            document.getElementById('v_scale').innerText = s.toFixed(2);
-            document.getElementById('v_armRX').innerText = rx.toFixed(1);
-            document.getElementById('v_armRY').innerText = ry.toFixed(1);
-            document.getElementById('v_armRZ').innerText = rz.toFixed(1);
+        sync('s_u', 'n_u');
+        sync('s_rx', 'n_rx');
+        sync('s_ry', 'n_ry');
+        sync('s_rz', 'n_rz');
+
+        function update() {
+            const u = parseFloat(document.getElementById('n_u').value); // 1マスのサイズ
+            const rx = parseFloat(document.getElementById('n_rx').value);
+            const ry = parseFloat(document.getElementById('n_ry').value);
+            const rz = parseFloat(document.getElementById('n_rz').value);
 
             Object.keys(parts).forEach(name => {
                 const p = parts[name];
-                p.scale.set(s, s, s);
+                p.scale.set(u, u, u); // 記録したサイズ感に合わせる
 
-                // 右腕だけスライダーの値で動かす
-                if(name === 'Arm_R') {
+                if (name === 'Arm_R') {
                     p.position.set(rx, ry, rz);
                 } else if (name === 'Body') {
                     p.position.set(0, 0, 0);
-                } else {
-                    // 他のパーツは一旦非表示にするか、端に寄せておくと調整しやすいです
-                    // p.visible = false; 
+                } else if (name === 'Arm_L') {
+                    // 右腕の数値を反転させて自動配置（テスト用）
+                    p.position.set(-rx, ry, rz);
                 }
             });
         }
-
-        document.querySelectorAll('input').forEach(el => el.addEventListener('input', update));
 
         function animate() {
             requestAnimationFrame(animate);
