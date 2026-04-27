@@ -3,20 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kunya Player</title>
+<title>Kunya System</title>
 <style>
-body { margin: 0; overflow: hidden; background:#111; }
+body { margin:0; overflow:hidden; background:#111; }
+
+/* ジョイスティック */
 #joy {
-  position: fixed; bottom: 60px; left: 60px;
-  width: 120px; height: 120px;
+  position: fixed;
+  bottom: 40px;
+  left: 40px;
+  width: 130px;
+  height: 130px;
   border-radius: 50%;
   background: rgba(255,255,255,0.1);
 }
+
 #knob {
-  position: absolute; top: 30px; left: 30px;
-  width: 60px; height: 60px;
-  border-radius: 50%;
-  background: white;
+  position:absolute;
+  top:40px;
+  left:40px;
+  width:50px;
+  height:50px;
+  border-radius:50%;
+  background:white;
 }
 </style>
 </head>
@@ -37,53 +46,71 @@ body { margin: 0; overflow: hidden; background:#111; }
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// === 基本 ===
+/* =======================
+   基本セットアップ
+======================= */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-camera.position.set(0, 6, 8);
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 7, 9);
 
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 1));
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
 const light = new THREE.DirectionalLight(0xffffff, 1);
 light.position.set(5,10,5);
 scene.add(light);
 
-// 地面
+/* =======================
+   地面
+======================= */
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(50,50),
-  new THREE.MeshStandardMaterial({color:0x222222})
+  new THREE.MeshStandardMaterial({color:0x333333})
 );
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// === プレイヤー ===
-const loader = new GLTFLoader();
+/* =======================
+   プレイヤー
+======================= */
 const player = new THREE.Group();
 scene.add(player);
 
-let parts = {};
+let parts = {
+  body:null,
+  armL:null,
+  armR:null,
+  legL:null,
+  legR:null
+};
 
-loader.load("Base.glb", (gltf)=>{
-  const root = gltf.scene;
-  player.add(root);
+/* =======================
+   モデル読み込み
+======================= */
+new GLTFLoader().load("Base.glb", (gltf)=>{
+  const model = gltf.scene;
 
-  // 名前で取得
-  root.traverse(obj=>{
-    if(obj.name.includes("body")) parts.body = obj;
-    if(obj.name.includes("head")) parts.head = obj;
-    if(obj.name.includes("arm_L")) parts.armL = obj;
-    if(obj.name.includes("arm_R")) parts.armR = obj;
-    if(obj.name.includes("leg_L")) parts.legL = obj;
-    if(obj.name.includes("leg_R")) parts.legR = obj;
+  model.traverse(obj=>{
+    if(!obj.isMesh) return;
+
+    if(obj.name === "Body") parts.body = obj;
+    if(obj.name === "Arm_L") parts.armL = obj;
+    if(obj.name === "Arm_R") parts.armR = obj;
+    if(obj.name === "Leg_L") parts.legL = obj;
+    if(obj.name === "Leg_R") parts.legR = obj;
   });
+
+  player.add(model);
 });
 
-// === 入力 ===
+/* =======================
+   ジョイスティック
+======================= */
 let input = {x:0, z:0};
 
 const joy = document.getElementById("joy");
@@ -91,110 +118,130 @@ const knob = document.getElementById("knob");
 
 let active = false;
 
-joy.addEventListener("touchstart", ()=>active=true);
+joy.addEventListener("touchstart", e=>{
+  active = true;
+});
 
-window.addEventListener("touchmove", (e)=>{
+window.addEventListener("touchmove", e=>{
   if(!active) return;
 
   const t = e.touches[0];
   const rect = joy.getBoundingClientRect();
 
-  let dx = t.clientX - (rect.left + 60);
-  let dy = t.clientY - (rect.top + 60);
+  const dx = t.clientX - (rect.left+65);
+  const dy = t.clientY - (rect.top+65);
 
-  const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 50);
+  const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 55);
   const ang = Math.atan2(dy, dx);
 
   knob.style.transform =
     `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
 
-  input.x = Math.cos(ang)*(dist/50);
-  input.z = Math.sin(ang)*(dist/50);
+  input.x = Math.cos(ang)*(dist/55);
+  input.z = Math.sin(ang)*(dist/55);
 });
 
 window.addEventListener("touchend", ()=>{
-  active=false;
-  knob.style.transform="translate(0,0)";
-  input.x=0; input.z=0;
+  active = false;
+  knob.style.transform = "translate(0,0)";
+  input = {x:0,z:0};
 });
 
-// === くにゃ動き ===
+/* =======================
+   くにゃ物理
+======================= */
 let velocity = new THREE.Vector3();
 let targetVelocity = new THREE.Vector3();
 
 const clock = new THREE.Clock();
 
+/* =======================
+   メインループ
+======================= */
 function animate(){
   requestAnimationFrame(animate);
+
   const dt = clock.getDelta();
-  const t = clock.getElapsedTime();
+  const time = clock.getElapsedTime();
 
-  // 目標速度
-  targetVelocity.set(input.x*6,0,input.z*6);
+  /* --- 移動 --- */
+  targetVelocity.set(input.x*6, 0, input.z*6);
 
-  // ぬるっと加速
-  velocity.lerp(targetVelocity, 0.1);
+  velocity.lerp(targetVelocity, 0.12); // 遅延
+  velocity.multiplyScalar(0.94);       // 摩擦
 
-  // 減衰
-  velocity.multiplyScalar(0.95);
-
-  // 移動
   player.position.add(velocity.clone().multiplyScalar(dt));
 
   const speed = velocity.length();
 
-  // 回転（遅延）
-  if(speed > 0.01){
-    const targetRot = Math.atan2(velocity.x, velocity.z);
-    player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, targetRot, 0.15);
+  /* --- 向き --- */
+  if(speed > 0.05){
+    const rot = Math.atan2(velocity.x, velocity.z);
+    player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, rot, 0.12);
   }
 
-  // ===== くにゃ表現 =====
+  /* =======================
+     くにゃ挙動
+  ======================= */
 
-  // 体伸縮
-  if(parts.body){
-    parts.body.scale.y = 1 + speed*0.3;
-    parts.body.scale.x = 1 - speed*0.15;
-    parts.body.scale.z = 1 - speed*0.15;
-  }
+  // 伸び縮み
+  player.scale.y = 1 + speed * 0.25;
+  player.scale.x = 1 - speed * 0.12;
+  player.scale.z = 1 - speed * 0.12;
 
   // バウンド
-  player.position.y = Math.abs(Math.sin(t*10))*speed*0.2;
+  player.position.y = Math.abs(Math.sin(time*8)) * speed * 0.25;
 
-  // 頭遅延
-  if(parts.head){
-    parts.head.rotation.y = Math.sin(t*5)*0.1;
+  // 横にしなる
+  if(parts.body){
+    parts.body.rotation.z = -velocity.x * 0.15;
   }
 
-  // 腕スイング
+  // 止まった時プルプル
+  if(speed < 0.1 && parts.body){
+    parts.body.scale.y = 1 + Math.sin(time*6)*0.05;
+  }
+
+  // 腕
   if(parts.armL){
-    parts.armL.rotation.x = Math.sin(t*10)*speed;
+    parts.armL.rotation.x = Math.sin(time*10)*speed*1.5;
   }
   if(parts.armR){
-    parts.armR.rotation.x = -Math.sin(t*10)*speed;
+    parts.armR.rotation.x = -Math.sin(time*10)*speed*1.5;
   }
 
-  // 足スイング
+  // 足
   if(parts.legL){
-    parts.legL.rotation.x = -Math.sin(t*10)*speed;
+    parts.legL.rotation.x = -Math.sin(time*10)*speed*1.2;
   }
   if(parts.legR){
-    parts.legR.rotation.x = Math.sin(t*10)*speed;
+    parts.legR.rotation.x = Math.sin(time*10)*speed*1.2;
   }
 
-  // カメラ追従
-  camera.position.lerp(
-    new THREE.Vector3(
-      player.position.x,
-      6,
-      player.position.z + 8
-    ), 0.1
+  /* --- カメラ --- */
+  const camTarget = new THREE.Vector3(
+    player.position.x,
+    6,
+    player.position.z + 8
   );
+
+  camera.position.lerp(camTarget, 0.08);
   camera.lookAt(player.position);
 
-  renderer.render(scene,camera);
+  renderer.render(scene, camera);
 }
+
 animate();
 
-window.addEventListener('resize', ()=>{
-  camera.aspect = inner
+/* =======================
+   リサイズ
+======================= */
+window.addEventListener("resize", ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+
+</body>
+</html>
