@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Dash Attack</title>
+    <title>Snail Adventure - Dash Adjust</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
         #ui-container { position: fixed; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -24,7 +24,6 @@
             color: white; font-weight: bold; display: flex; align-items: center; justify-content: center;
             pointer-events: auto; user-select: none; transition: opacity 0.2s, background 0.2s;
         }
-        /* スタミナバー関連のCSSは不要になったため削除 */
         .side-btn {
             position: absolute; left: 20px; width: 60px; height: 45px;
             background: rgba(0,0,0,0.6); color: white; border: 1px solid #fff;
@@ -37,8 +36,8 @@
 <body>
 
     <div id="ui-container">
-        <div id="move-joy" class="joystick-base"><div id="move-knob" class="joystick-knob"></div></div>
-        <div id="attack-joy" class="joystick-base"><div id="attack-knob" class="joystick-knob"></div></div>
+        <div id="move-joy" class="joy-base"><div id="move-knob" class="joystick-knob"></div></div>
+        <div id="attack-joy" class="joy-base"><div id="attack-knob" class="joystick-knob"></div></div>
         <div id="dash-btn">DASH</div>
         <button id="camera-btn" class="side-btn">視点切替</button>
         <button id="weapon-btn" class="side-btn">武器切替</button>
@@ -61,19 +60,27 @@
             models: {
                 body: { file: 'Snail.glb', pos: [0, 0, 0] },
                 shell: { file: 'Shell.glb', pos: [0, 0.25, -0.25] },
-                dashShell: { file: 'Shell dash.glb', pos: [0, 0.65, 0], scale: 1.2 },
                 shellEquip: { file: 'Shell equip.glb', pos: [0, 0.25, -0.25] },
-                gun: { file: 'Gun.glb', pos: [0, 1.2, -0.3], scale: 0.7 }
+                gun: { file: 'Gun.glb', pos: [0, 1.2, -0.3], scale: 0.7 },
+                
+                // --- ダッシュ用シェルの詳細調整 ---
+                dashShell: { 
+                    file: 'Shell_dash.glb', 
+                    scale: 1.2,
+                    pivotPos: [0, 0.65, 0],   // 回転の中心となる座標
+                    modelOffset: [0, -0.3, 0], // 中心から見たモデルのズレ調整
+                    rotateAxis: 'x',           // 回転させる軸 ('x', 'y', 'z')
+                    rotateSpeed: 20.0          // 回転の速さ
+                }
             },
             game: {
                 fireRate: 6.0,
                 bulletRange: 20.0,
                 bulletSpeed: 45.0,
                 aimLineWidth: 0.30,
-                // --- 突進（ダッシュ）の調整パラメータ ---
-                dashDuration: 0.3,    // 突進している時間（秒）
-                dashCooldown: 2.0,    // 次に使えるまでの待ち時間（秒）
-                dashSpeed: 25.0       // 突進時の移動速度
+                dashDuration: 0.3,
+                dashCooldown: 2.0,
+                dashSpeed: 25.0
             }
         };
 
@@ -82,15 +89,13 @@
             currentWeapon: 'normal',
             isAiming: false,
             camMode: 1,
-            // --- 突進の状態管理 ---
-            isDashing: false,       // 現在突進中か
-            dashTimer: 0,          // 突進の残り時間
-            dashCooldownTimer: 0,  // クールタイムの残り時間
+            isDashing: false,
+            dashTimer: 0,
+            dashCooldownTimer: 0,
             dashRot: 0,
             lastFireTime: 0
         };
 
-        // 基本設定
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -111,8 +116,11 @@
         scene.add(ground);
         scene.add(new THREE.GridHelper(100, 50, 0x444444, 0x444444));
 
+        // プレイヤーの親
         const snailPlayer = new THREE.Group();
         scene.add(snailPlayer);
+        
+        // ダッシュ回転用の中心点（ピボット）
         const dashPivot = new THREE.Group();
         snailPlayer.add(dashPivot);
 
@@ -122,10 +130,12 @@
 
         manager.onLoad = () => { 
             state.isLoaded = true;
+            // 読み込み完了後にピボットとモデル位置をconfigから適用
             if (loadedModels.dashShell) {
+                const c = config.models.dashShell;
                 dashPivot.add(loadedModels.dashShell);
-                loadedModels.dashShell.position.set(0, -0.3, 0); 
-                dashPivot.position.set(0, 0.65, 0);
+                loadedModels.dashShell.position.set(...c.modelOffset); 
+                dashPivot.position.set(...c.pivotPos);
             }
         };
 
@@ -179,7 +189,6 @@
         const dashBtn = document.getElementById('dash-btn');
         dashBtn.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            // 突進中でなく、かつクールタイムが終わっていれば発動
             if (!state.isDashing && state.dashCooldownTimer <= 0) {
                 state.isDashing = true;
                 state.dashTimer = config.game.dashDuration;
@@ -199,14 +208,15 @@
             const dt = clock.getDelta(), elapsed = clock.getElapsedTime();
             const isMoving = Math.abs(moveInput.x) > 0.1 || Math.abs(moveInput.z) > 0.1;
 
-            // --- 突進・クールタイムのタイマー処理 ---
             if (state.dashTimer > 0) {
                 state.dashTimer -= dt;
-                if (state.dashTimer <= 0) state.isDashing = false;
+                if (state.dashTimer <= 0) {
+                    state.isDashing = false;
+                    dashPivot.rotation.set(0,0,0); // 回転リセット
+                }
             }
             if (state.dashCooldownTimer > 0) {
                 state.dashCooldownTimer -= dt;
-                // クールタイム中はボタンを暗くし、終わったら戻す
                 dashBtn.style.opacity = "0.3";
                 dashBtn.style.background = "rgba(0, 0, 0, 0.5)";
             } else {
@@ -214,17 +224,14 @@
                 dashBtn.style.background = "rgba(255, 255, 255, 0.15)";
             }
 
-            // 速度の決定
             let currentSpeed = 6;
             if (state.isDashing) {
                 currentSpeed = config.game.dashSpeed;
-                if (Math.random() > 0.2) createDust(0.2); // 突進中は土煙を多めに出す
+                if (Math.random() > 0.2) createDust(0.2);
             } else if (isMoving && Math.random() > 0.8) {
                 createDust(0.1);
             }
 
-            // 移動処理
-            // 突進中は操作を受け付けず、向いている方向に進む（または入力方向に固定）
             const moveX = moveInput.x * currentSpeed * dt;
             const moveZ = moveInput.z * currentSpeed * dt;
             snailPlayer.position.x += moveX;
@@ -234,17 +241,21 @@
                 snailPlayer.rotation.y = THREE.MathUtils.lerp(snailPlayer.rotation.y, Math.atan2(moveInput.x, moveInput.z), 0.15);
             }
 
-            // --- モデルの表示・アニメーション切り替え ---
+            // モデル表示管理
             Object.values(loadedModels).forEach(m => { if(m && m.parent === snailPlayer) m.visible = false; });
             dashPivot.visible = false;
 
             if (state.isDashing) {
-                // 突進中（回転状態）
                 dashPivot.visible = true;
-                state.dashRot += dt * 20; // 回転スピード
-                dashPivot.rotation.x = state.dashRot;
+                const c = config.models.dashShell;
+                state.dashRot += dt * c.rotateSpeed;
+                
+                // configで指定した軸を回転させる
+                if(c.rotateAxis === 'y') dashPivot.rotation.y = state.dashRot;
+                else if(c.rotateAxis === 'z') dashPivot.rotation.z = state.dashRot;
+                else dashPivot.rotation.x = state.dashRot;
+
             } else {
-                // 通常時
                 loadedModels.body.visible = true;
                 const wave = Math.sin(elapsed * (isMoving ? 12 : 1.5));
                 loadedModels.body.scale.y = 1 + wave * (isMoving ? 0.12 : 0.03);
@@ -266,37 +277,31 @@
                 }
             }
 
-            // 弾・エフェクトの更新
             updateEffects(dt, elapsed);
-
-            // カメラ
             const cfg = camOffsets[state.camMode];
             camera.position.lerp(new THREE.Vector3(snailPlayer.position.x, cfg.h, snailPlayer.position.z + cfg.d), 0.1);
             camera.lookAt(snailPlayer.position);
             renderer.render(scene, camera);
         }
 
+        // --- 以下、エフェクト・射撃処理 (変更なし) ---
         function updateEffects(dt, elapsed) {
-            // 射撃
             if (state.isAiming && state.currentWeapon === 'gun' && !state.isDashing) {
                 if (elapsed - state.lastFireTime > (1.0 / config.game.fireRate)) {
                     fireBullet();
                     state.lastFireTime = elapsed;
                 }
             }
-            // 弾の移動
             bullets.forEach((b, i) => {
                 b.mesh.position.add(b.vel.clone().multiplyScalar(dt));
                 b.life -= dt;
                 if (b.life < 0.2) b.mesh.material.opacity = Math.max(0, b.life / 0.2);
                 if (b.life <= 0) { scene.remove(b.mesh); bullets.splice(i, 1); }
             });
-            // 土煙
             dustParticles.forEach((p, i) => {
                 p.life -= dt * 2.2; p.mesh.scale.setScalar(Math.max(0, p.life));
                 if (p.life <= 0) { scene.remove(p.mesh); dustParticles.splice(i, 1); }
             });
-            // マズルフラッシュ
             muzzleFlashes.forEach((f, i) => {
                 f.life -= dt; f.mesh.scale.multiplyScalar(0.85);
                 if (f.life <= 0) { scene.remove(f.mesh); muzzleFlashes.splice(i, 1); }
@@ -329,4 +334,3 @@
     </script>
 </body>
 </html>
-
