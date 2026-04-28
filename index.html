@@ -13,46 +13,50 @@
     <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
-        // 1. シーン・カメラ・レンダラーの基本設定
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x2F2F2F); // 背景色（ダークグレー）
+        scene.background = new THREE.Color(0x2F2F2F);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(2, 2, 5); // モデルが見える位置にカメラを配置
+        camera.position.set(2, 2, 5);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // 2. ライトの設定（モデルが見えるように明るくする）
         const light = new THREE.DirectionalLight(0xffffff, 1.5);
         light.position.set(5, 10, 7.5);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-        // 3. モデルの読み込み
         const loader = new THREE.GLTFLoader();
 
-        // 胴体の読み込み
-        loader.load('Snail.glb', (gltf) => {
-            scene.add(gltf.scene);
-            console.log('Snail loaded');
+        // 正確なファイル名で読み込み
+        const files = ['Snail.glb', 'Shell.glb'];
+
+        files.forEach(file => {
+            loader.load(file, (gltf) => {
+                scene.add(gltf.scene);
+                console.log('Success:', file);
+                
+                // モデルがどこにいても中央に持ってくる調整
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                const center = box.getCenter(new THREE.Vector3());
+                gltf.scene.position.sub(center); 
+            }, undefined, (err) => {
+                console.error('Error loading ' + file + ':', err);
+            });
         });
 
-        // 殻の読み込み
-        loader.load('Shell.glb', (gltf) => {
-            scene.add(gltf.scene);
-            console.log('Shell loaded');
-        });
-
-        // 4. 描画ループ
         function animate() {
             requestAnimationFrame(animate);
+            // モデルが読み込まれたらゆっくり回転させて生存確認しやすくする
+            scene.children.forEach(child => {
+                if(child.type === "Group") child.rotation.y += 0.01;
+            });
             renderer.render(scene, camera);
         }
         animate();
 
-        // 画面サイズが変わった時の調整
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
