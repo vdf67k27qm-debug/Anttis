@@ -6,52 +6,76 @@
     <title>Snail Model Viewer</title>
     <style>
         body { margin: 0; overflow: hidden; background: #2F2F2F; }
+        #loading-log { position: absolute; top: 10px; left: 10px; color: #00ff00; font-family: monospace; pointer-events: none; }
     </style>
 </head>
 <body>
+    <div id="loading-log">Initializing...</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
     <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
+        const log = (msg) => {
+            document.getElementById('loading-log').innerHTML += `<br>> ${msg}`;
+            console.log(msg);
+        };
+
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x2F2F2F);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(2, 2, 5);
+        // カメラを一旦遠くに配置
+        camera.position.set(5, 5, 5);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1.5);
-        light.position.set(5, 10, 7.5);
+        const light = new THREE.DirectionalLight(0xffffff, 2);
+        light.position.set(10, 10, 10);
         scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        scene.add(new THREE.AmbientLight(0xffffff, 1));
 
         const loader = new THREE.GLTFLoader();
-
-        // 正確なファイル名で読み込み
-        const files = ['Snail.glb', 'Shell.glb'];
+        
+        // パスを「./」にすることで同じ階層であることを明示
+        const files = ['./Snail.glb', './Shell.glb'];
+        let loadedCount = 0;
 
         files.forEach(file => {
             loader.load(file, (gltf) => {
-                scene.add(gltf.scene);
-                console.log('Success:', file);
+                const model = gltf.scene;
+                scene.add(model);
+                log(`Loaded: ${file}`);
                 
-                // モデルがどこにいても中央に持ってくる調整
-                const box = new THREE.Box3().setFromObject(gltf.scene);
-                const center = box.getCenter(new THREE.Vector3());
-                gltf.scene.position.sub(center); 
+                loadedCount++;
+                if(loadedCount === files.length) {
+                    fitCameraToModels();
+                }
             }, undefined, (err) => {
-                console.error('Error loading ' + file + ':', err);
+                log(`ERROR: ${file} (Check filename)`);
             });
         });
 
+        // 全てのモデルが収まるようにカメラを調整する関数
+        function fitCameraToModels() {
+            const box = new THREE.Box3().setFromObject(scene);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 2; // 少し余裕を持たせる
+
+            camera.position.set(cameraZ, cameraZ, cameraZ);
+            camera.lookAt(center);
+            log("Camera adjusted.");
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            // モデルが読み込まれたらゆっくり回転させて生存確認しやすくする
-            scene.children.forEach(child => {
-                if(child.type === "Group") child.rotation.y += 0.01;
+            // 読み込まれたモデルをゆっくり回転させて確認
+            scene.traverse((child) => {
+                if (child.isGroup) child.rotation.y += 0.005;
             });
             renderer.render(scene, camera);
         }
