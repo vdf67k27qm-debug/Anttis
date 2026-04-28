@@ -2,90 +2,129 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Snail Model Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snail Adventure - Mobile</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #2F2F2F; }
-        #loading-log { position: absolute; top: 10px; left: 10px; color: #00ff00; font-family: monospace; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; }
+        #joystick-container {
+            position: absolute; bottom: 50px; left: 40px; width: 120px; height: 120px;
+            background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%;
+        }
+        #joystick-knob {
+            position: absolute; top: 35px; left: 35px; width: 50px; height: 50px;
+            background: #FFD700; border-radius: 50%; box-shadow: 0 0 15px rgba(255,215,0,0.5);
+        }
     </style>
 </head>
 <body>
-    <div id="loading-log">Initializing...</div>
+    <div id="joystick-container"><div id="joystick-knob"></div></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
     <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
-        const log = (msg) => {
-            document.getElementById('loading-log').innerHTML += `<br>> ${msg}`;
-            console.log(msg);
-        };
-
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x2F2F2F);
+        scene.background = new THREE.Color(0x1a1a1a);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        // カメラを一旦遠くに配置
-        camera.position.set(5, 5, 5);
+        camera.position.set(0, 5, 8);
+        camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
         const light = new THREE.DirectionalLight(0xffffff, 2);
-        light.position.set(10, 10, 10);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 1));
+        light.position.set(5, 10, 5);
+        scene.add(light, new THREE.AmbientLight(0xffffff, 0.6));
+
+        // 地面
+        const grid = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+        scene.add(grid);
+
+        // --- モデル管理 ---
+        const snailGroup = new THREE.Group(); // 胴体と殻をまとめる親
+        const motionGroup = new THREE.Group(); // 揺れモーション用
+        snailGroup.add(motionGroup);
+        scene.add(snailGroup);
 
         const loader = new THREE.GLTFLoader();
-        
-        // パスを「./」にすることで同じ階層であることを明示
-        const files = ['./Snail.glb', './Shell.glb'];
-        let loadedCount = 0;
+        const models = { body: null, shell: null };
 
-        files.forEach(file => {
+        ['Snail.glb', 'Shell.glb'].forEach(file => {
             loader.load(file, (gltf) => {
                 const model = gltf.scene;
-                scene.add(model);
-                log(`Loaded: ${file}`);
-                
-                loadedCount++;
-                if(loadedCount === files.length) {
-                    fitCameraToModels();
-                }
-            }, undefined, (err) => {
-                log(`ERROR: ${file} (Check filename)`);
+                motionGroup.add(model);
+                if(file === 'Snail.glb') models.body = model;
+                if(file === 'Shell.glb') models.shell = model;
+                console.log(file + " loaded");
             });
         });
 
-        // 全てのモデルが収まるようにカメラを調整する関数
-        function fitCameraToModels() {
-            const box = new THREE.Box3().setFromObject(scene);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const fov = camera.fov * (Math.PI / 180);
-            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 2; // 少し余裕を持たせる
+        // --- ジョイスティック計算 ---
+        let moveInput = { x: 0, y: 0 };
+        const container = document.getElementById('joystick-container');
+        const knob = document.getElementById('joystick-knob');
 
-            camera.position.set(cameraZ, cameraZ, cameraZ);
-            camera.lookAt(center);
-            log("Camera adjusted.");
-        }
+        const handleTouch = (e) => {
+            const touch = e.touches[0];
+            const rect = container.getBoundingClientRect();
+            const centerX = rect.left + 60;
+            const centerY = rect.top + 60;
+            const dx = touch.clientX - centerX;
+            const dy = touch.clientY - centerY;
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+            const angle = Math.atan2(dy, dx);
+
+            knob.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+            moveInput = { x: Math.cos(angle) * (dist/40), y: Math.sin(angle) * (dist/40) };
+        };
+
+        container.addEventListener('touchstart', handleTouch);
+        container.addEventListener('touchmove', (e) => { e.preventDefault(); handleTouch(e); });
+        container.addEventListener('touchend', () => {
+            knob.style.transform = `translate(0, 0)`;
+            moveInput = { x: 0, y: 0 };
+        });
+
+        // --- アニメーション変数 ---
+        let clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
-            // 読み込まれたモデルをゆっくり回転させて確認
-            scene.traverse((child) => {
-                if (child.isGroup) child.rotation.y += 0.005;
-            });
+            const dt = clock.getElapsedTime();
+            const speed = 0.12;
+
+            if (moveInput.x !== 0 || moveInput.y !== 0) {
+                // 1. 移動
+                snailGroup.position.x += moveInput.x * speed;
+                snailGroup.position.z += moveInput.y * speed;
+
+                // 2. 向き（ゆっくり回転）
+                const targetRotation = Math.atan2(-moveInput.x, -moveInput.y);
+                snailGroup.rotation.y = THREE.MathUtils.lerp(snailGroup.rotation.y, targetRotation, 0.15);
+
+                // 3. 移動モーション（ふにゃふにゃ感）
+                // 前後の揺れ
+                motionGroup.rotation.x = Math.sin(dt * 10) * 0.1;
+                // 左右の傾き（曲がる時に少し傾ける）
+                motionGroup.rotation.z = THREE.MathUtils.lerp(motionGroup.rotation.z, -moveInput.x * 0.2, 0.1);
+                // 上下の跳ね
+                motionGroup.position.y = Math.abs(Math.sin(dt * 10)) * 0.05;
+            } else {
+                // 待機モーション（呼吸するように）
+                motionGroup.scale.y = 1 + Math.sin(dt * 2) * 0.02;
+                motionGroup.rotation.x = THREE.MathUtils.lerp(motionGroup.rotation.x, 0, 0.1);
+                motionGroup.rotation.z = THREE.MathUtils.lerp(motionGroup.rotation.z, 0, 0.1);
+            }
+
+            // カメラがカタツムリを追従
+            camera.position.lerp(new THREE.Vector3(snailGroup.position.x, 5, snailGroup.position.z + 8), 0.1);
+            camera.lookAt(snailGroup.position);
+
             renderer.render(scene, camera);
         }
         animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
