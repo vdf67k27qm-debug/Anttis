@@ -68,7 +68,7 @@
             models: {
                 body: { file: 'Snail.glb', pos: [0, 0, 0] },
                 shell: { file: 'Shell.glb', pos: [0, 0.25, -0.25] },
-                club: { file: 'Club.glb', equipPos: [0, 1.2, -0.3], scale: 0.5 },
+                club: { file: 'Club.glb', equipPos: [0, 1.2, -0.3], scale: 0.8 },
                 dashShell: { file: 'Shell_dash.glb', scale: 1.2, pivotPos: [0, 0.65, 0], modelOffset: [0, -0.3, 0], rotateAxis: 'x', rotateSpeed: 15.0 }
             },
             game: {
@@ -91,7 +91,7 @@
             pickupTimer: 0,
             clubVel: new THREE.Vector3(),
             clubRot: 0,
-            throwAnimTimer: 0 // 投擲時の前傾姿勢用
+            throwAnimTimer: 0 
         };
 
         const scene = new THREE.Scene();
@@ -142,7 +142,7 @@
                 dashPivot.position.set(...config.models.dashShell.pivotPos);
             }
             loadedModels.club.position.set(5, 0.3, 5);
-            loadedModels.club.rotation.set(Math.PI/2, 0, 0); // 初期状態で横たえる
+            loadedModels.club.rotation.set(Math.PI/2, 0, 0); 
             scene.add(loadedModels.club);
         };
         const gltfLoader = new GLTFLoader(manager);
@@ -200,13 +200,12 @@
             state.dashInput = {x, z}; state.isAimingDash = d > 15; 
         }, () => { 
             if (state.isAimingDash && state.dashCooldownTimer <= 0 && !state.isDashing) {
-                // ダッシュ時に装備中なら棍棒を落とす
                 if (state.clubState === 'equipped') {
                     state.clubState = 'thrown';
                     const club = loadedModels.club;
                     scene.attach(club);
                     const dropDir = new THREE.Vector3(state.dashInput.x, 0.2, state.dashInput.z).normalize();
-                    state.clubVel.copy(dropDir).multiplyScalar(config.game.dashSpeed * 0.8);
+                    state.clubVel.copy(dropDir).multiplyScalar(config.game.dashSpeed * 0.3); // 慣性を弱く修正
                 }
                 state.isDashing = true; state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown; state.dashDir = { ...state.dashInput };
@@ -225,7 +224,7 @@
 
         function throwClub() {
             state.clubState = 'thrown';
-            state.throwAnimTimer = 0.3; // 投げた後の前傾姿勢時間
+            state.throwAnimTimer = 0.2; // 伸び上がり時間
             const club = loadedModels.club;
             scene.attach(club);
             const dir = new THREE.Vector3(state.attackInput.x, config.game.throwUpwardForce, state.attackInput.z).normalize();
@@ -257,7 +256,9 @@
                 if (state.dashTimer <= 0) { state.isDashing = false; dashPivot.rotation.set(0,0,0); }
             }
 
-            let currentSpeed = state.isDashing ? config.game.dashSpeed : 6;
+            // 移動速度の計算（エイム中は少し遅く）
+            let speedMult = state.isAimingAttack ? 0.6 : 1.0;
+            let currentSpeed = state.isDashing ? config.game.dashSpeed : (6 * speedMult);
             let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x;
             let moveZ = state.isDashing ? state.dashDir.z : state.moveInput.z;
             snailPlayer.position.x += moveX * currentSpeed * dt;
@@ -285,25 +286,33 @@
                 dashPivot.rotation.x = state.dashRot;
                 if (Math.random() > 0.2) createDust(0.2);
             } else {
-                // 投擲モーションの処理
-                let throwTilt = 0;
+                // 伸縮アニメーションの処理
+                let squashStretch = 1.0;
+                let heightOffset = 0;
                 if (state.isAimingAttack) {
-                    throwTilt = -0.4; // エイム中の溜め（のけぞり）
+                    squashStretch = 0.7; // かがみ込み
+                    heightOffset = -0.1;
                 } else if (state.throwAnimTimer > 0) {
                     state.throwAnimTimer -= dt;
-                    throwTilt = 0.6; // 投げた瞬間の前傾
+                    squashStretch = 1.3; // 伸び上がり
+                    heightOffset = 0.15;
                 }
 
-                loadedModels.body.scale.y = 1 + bodyWave * (isMoving ? 0.12 : 0.03);
-                loadedModels.body.rotation.x = throwTilt;
-                loadedModels.shell.position.y = 0.25 + shellWave * 0.04;
+                loadedModels.body.scale.y = (1 + bodyWave * (isMoving ? 0.12 : 0.03)) * squashStretch;
+                loadedModels.body.position.y = heightOffset;
+                loadedModels.body.rotation.x = 0; // 以前の傾きをリセット
+                
+                loadedModels.shell.position.y = 0.25 + shellWave * 0.04 + heightOffset;
                 loadedModels.shell.rotation.z = moveSwing;
-                loadedModels.shell.rotation.x = throwTilt;
+                loadedModels.shell.rotation.x = 0; // 以前の傾きをリセット
+                loadedModels.shell.scale.y = squashStretch;
 
                 const club = loadedModels.club;
                 if (state.clubState === 'ground') {
                     pickupCircle.visible = true;
                     pickupCircle.position.set(club.position.x, 0.05, club.position.z);
+                    club.rotation.set(Math.PI/2, 0, 0); // 地面にある時は常に水平
+
                     const dist = snailPlayer.position.distanceTo(club.position);
                     if (dist < 1.5) {
                         state.pickupTimer += dt;
@@ -323,7 +332,7 @@
                     club.visible = true;
                     club.position.set(
                         config.models.club.equipPos[0], 
-                        config.models.club.equipPos[1] + shellWave * 0.04, 
+                        config.models.club.equipPos[1] + (shellWave * 0.04) + (heightOffset * 2), 
                         config.models.club.equipPos[2]
                     );
                     club.rotation.set(moveSwing * 2, 0, moveSwing);
@@ -346,7 +355,7 @@
                         if (state.clubVel.length() < 1) {
                             state.clubState = 'ground';
                             state.pickupTimer = 0;
-                            club.rotation.set(Math.PI/2, 0, 0); // アイテム化時に水平に固定
+                            club.rotation.set(Math.PI/2, 0, 0); 
                         }
                     }
                 }
