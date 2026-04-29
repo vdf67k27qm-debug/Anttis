@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Dash Adjust</title>
+    <title>Snail Adventure - Dash Aim Update</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
         #ui-container { position: fixed; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -15,15 +15,17 @@
         .joystick-knob {
             position: absolute; top: 35px; left: 35px; width: 60px; height: 60px;
             background: radial-gradient(circle, #fff, #ccc); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
         }
         #move-joy { bottom: 50px; left: 40px; }
-        #attack-joy { bottom: 180px; right: 40px; border-color: rgba(255, 100, 100, 0.3); }
-        #dash-btn {
-            position: absolute; bottom: 50px; right: 50px; width: 100px; height: 100px;
-            background: rgba(255, 255, 255, 0.15); border: 3px solid #fff; border-radius: 50%;
-            color: white; font-weight: bold; display: flex; align-items: center; justify-content: center;
-            pointer-events: auto; user-select: none; transition: opacity 0.2s, background 0.2s;
-        }
+        /* 右ジョイスティック（ダッシュ/攻撃） */
+        #attack-joy { bottom: 50px; right: 40px; border-color: rgba(100, 200, 255, 0.3); }
+        
+        /* クールダウン用ゲージ */
+        .cd-svg { width: 60px; height: 60px; transform: rotate(-90deg); position: absolute; pointer-events: none; }
+        .cd-bg { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 6; }
+        .cd-bar { fill: none; stroke: #00e5ff; stroke-width: 6; stroke-dasharray: 170; stroke-dashoffset: 170; transition: stroke-dashoffset 0.1s linear; }
+
         .side-btn {
             position: absolute; left: 20px; width: 60px; height: 45px;
             background: rgba(0,0,0,0.6); color: white; border: 1px solid #fff;
@@ -37,8 +39,12 @@
 
     <div id="ui-container">
         <div id="move-joy" class="joystick-base"><div id="move-knob" class="joystick-knob"></div></div>
-        <div id="attack-joy" class="joystick-base"><div id="attack-knob" class="joystick-knob"></div></div>
-        <div id="dash-btn">DASH</div>
+        <div id="attack-joy" class="joystick-base">
+            <div id="attack-knob" class="joystick-knob">
+                <svg class="cd-svg"><circle class="cd-bg" cx="30" cy="30" r="27"/><circle id="cd-gauge" class="cd-bar" cx="30" cy="30" r="27"/></svg>
+                <span id="joy-label" style="color:white; font-size:10px; font-weight:bold; z-index:11;">DASH</span>
+            </div>
+        </div>
         <button id="camera-btn" class="side-btn">視点切替</button>
         <button id="weapon-btn" class="side-btn">武器切替</button>
     </div>
@@ -62,14 +68,13 @@
                 shell: { file: 'Shell.glb', pos: [0, 0.25, -0.25] },
                 shellEquip: { file: 'Shell equip.glb', pos: [0, 0.25, -0.25] },
                 gun: { file: 'Gun.glb', pos: [0, 1.2, -0.3], scale: 0.7 },
-                // --- ダッシュシェルの詳細調整項目 ---
                 dashShell: { 
                     file: 'Shell_dash.glb', 
                     scale: 1.2,
-                    pivotPos: [0, 0.65, 0],   // 回転の中心位置
-                    modelOffset: [0, -0.3, 0], // 中心から見たモデルの配置ズレ
-                    rotateAxis: 'x',           // 回転軸 ('x', 'y', 'z')
-                    rotateSpeed: 15.0          // 回転の速さ
+                    pivotPos: [0, 0.65, 0],
+                    modelOffset: [0, -0.3, 0],
+                    rotateAxis: 'x',
+                    rotateSpeed: 25.0
                 }
             },
             game: {
@@ -77,9 +82,11 @@
                 bulletRange: 20.0,
                 bulletSpeed: 45.0,
                 aimLineWidth: 0.30,
-                dashDuration: 0.3,
-                dashCooldown: 8.0,
-                dashSpeed: 15.0
+                // --- ダッシュ調整 ---
+                dashDuration: 0.4,
+                dashCooldown: 3.0,
+                dashSpeed: 35.0,
+                dashAimLineWidth: 0.6 // ダッシュエイム線の太さ
             }
         };
 
@@ -92,7 +99,8 @@
             dashTimer: 0,
             dashCooldownTimer: 0,
             dashRot: 0,
-            lastFireTime: 0
+            lastFireTime: 0,
+            dashDir: { x: 0, z: 0 }
         };
 
         const scene = new THREE.Scene();
@@ -117,8 +125,6 @@
 
         const snailPlayer = new THREE.Group();
         scene.add(snailPlayer);
-
-        // ダッシュ回転用ピボット
         const dashPivot = new THREE.Group();
         snailPlayer.add(dashPivot);
 
@@ -151,12 +157,22 @@
         });
 
         const bullets = [], dustParticles = [];
-        const aimLine = new THREE.Mesh(
+        // 通常射撃エイム線
+        const shootAimLine = new THREE.Mesh(
             new THREE.CylinderGeometry(config.game.aimLineWidth, config.game.aimLineWidth, config.game.bulletRange, 8).rotateX(Math.PI/2).translate(0, 0, config.game.bulletRange/2),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 })
         );
-        aimLine.visible = false;
-        scene.add(aimLine);
+        shootAimLine.visible = false;
+        scene.add(shootAimLine);
+
+        // ダッシュエイム線（長さ = 速さ × 時間）
+        const dashDist = config.game.dashSpeed * config.game.dashDuration;
+        const dashAimLine = new THREE.Mesh(
+            new THREE.CylinderGeometry(config.game.dashAimLineWidth, config.game.dashAimLineWidth, dashDist, 8).rotateX(Math.PI/2).translate(0, 0, dashDist/2),
+            new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.3 })
+        );
+        dashAimLine.visible = false;
+        scene.add(dashAimLine);
 
         let moveInput = { x: 0, z: 0 }, attackInput = { x: 0, z: 0 };
 
@@ -181,16 +197,18 @@
         }
 
         setupJoy('move-joy', 'move-knob', (x, z) => { moveInput = {x, z}; }, () => { moveInput = {x:0,z:0}; });
-        setupJoy('attack-joy', 'attack-knob', (x, z, d) => { attackInput = {x, z}; state.isAiming = d > 15; }, () => { state.isAiming = false; });
-
-        const dashBtn = document.getElementById('dash-btn');
-        dashBtn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            if (!state.isDashing && state.dashCooldownTimer <= 0) {
+        setupJoy('attack-joy', 'attack-knob', (x, z, d) => { 
+            attackInput = {x, z}; 
+            state.isAiming = d > 15; 
+        }, () => { 
+            // 指を離したとき、クールダウン中でなければダッシュ発動
+            if (state.isAiming && state.currentWeapon === 'normal' && state.dashCooldownTimer <= 0 && !state.isDashing) {
                 state.isDashing = true;
                 state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown;
+                state.dashDir = { ...attackInput };
             }
+            state.isAiming = false; 
         });
 
         document.getElementById('weapon-btn').addEventListener('click', () => { state.currentWeapon = (state.currentWeapon === "normal" ? "gun" : "normal"); });
@@ -205,65 +223,82 @@
             const dt = clock.getDelta(), elapsed = clock.getElapsedTime();
             const isMoving = Math.abs(moveInput.x) > 0.1 || Math.abs(moveInput.z) > 0.1;
 
-            if (state.dashTimer > 0) {
-                state.dashTimer -= dt;
-                if (state.dashTimer <= 0) {
-                    state.isDashing = false;
-                    dashPivot.rotation.set(0,0,0);
-                }
-            }
+            // クールダウンゲージ更新
+            const gauge = document.getElementById('cd-gauge');
+            const label = document.getElementById('joy-label');
             if (state.dashCooldownTimer > 0) {
                 state.dashCooldownTimer -= dt;
-                dashBtn.style.opacity = "0.3";
-                dashBtn.style.background = "rgba(0, 0, 0, 0.5)";
+                const progress = state.dashCooldownTimer / config.game.dashCooldown;
+                gauge.style.strokeDashoffset = progress * 170;
+                label.innerText = state.dashCooldownTimer.toFixed(1);
             } else {
-                dashBtn.style.opacity = "1.0";
-                dashBtn.style.background = "rgba(255, 255, 255, 0.15)";
+                gauge.style.strokeDashoffset = 0;
+                label.innerText = state.currentWeapon === 'normal' ? "DASH" : "FIRE";
+            }
+
+            if (state.dashTimer > 0) {
+                state.dashTimer -= dt;
+                if (state.dashTimer <= 0) { state.isDashing = false; dashPivot.rotation.set(0,0,0); }
             }
 
             let currentSpeed = 6;
             if (state.isDashing) {
                 currentSpeed = config.game.dashSpeed;
+                snailPlayer.position.x += state.dashDir.x * currentSpeed * dt;
+                snailPlayer.position.z += state.dashDir.z * currentSpeed * dt;
                 if (Math.random() > 0.2) createDust(0.2);
-            } else if (isMoving && Math.random() > 0.8) {
-                createDust(0.1);
+            } else {
+                snailPlayer.position.x += moveInput.x * currentSpeed * dt;
+                snailPlayer.position.z += moveInput.z * currentSpeed * dt;
             }
 
-            snailPlayer.position.x += moveInput.x * currentSpeed * dt;
-            snailPlayer.position.z += moveInput.z * currentSpeed * dt;
-
-            if (isMoving) {
+            if (isMoving && !state.isDashing) {
                 snailPlayer.rotation.y = THREE.MathUtils.lerp(snailPlayer.rotation.y, Math.atan2(moveInput.x, moveInput.z), 0.15);
+            } else if (state.isDashing) {
+                snailPlayer.rotation.y = Math.atan2(state.dashDir.x, state.dashDir.z);
             }
 
+            // モデル表示・揺れモーション復元
             Object.values(loadedModels).forEach(m => { if(m && m.parent === snailPlayer) m.visible = false; });
             dashPivot.visible = false;
+            shootAimLine.visible = false;
+            dashAimLine.visible = false;
 
             if (state.isDashing) {
                 dashPivot.visible = true;
                 const c = config.models.dashShell;
                 state.dashRot += dt * c.rotateSpeed;
-                if(c.rotateAxis === 'y') dashPivot.rotation.y = state.dashRot;
-                else if(c.rotateAxis === 'z') dashPivot.rotation.z = state.dashRot;
-                else dashPivot.rotation.x = state.dashRot;
+                dashPivot.rotation[c.rotateAxis] = state.dashRot;
             } else {
                 loadedModels.body.visible = true;
                 const wave = Math.sin(elapsed * (isMoving ? 12 : 1.5));
                 loadedModels.body.scale.y = 1 + wave * (isMoving ? 0.12 : 0.03);
                 
+                // 殻と武器の揺れモーション（ドキュメントから復元）
+                const shellWave = Math.sin(elapsed * (isMoving ? 12 : 1.5)) * 0.05;
+
                 if (state.currentWeapon === 'normal') {
                     loadedModels.shell.visible = true;
+                    loadedModels.shell.position.y = config.models.shell.pos[1] + shellWave;
+                    
+                    if (state.isAiming && state.dashCooldownTimer <= 0) {
+                        dashAimLine.visible = true;
+                        dashAimLine.position.set(snailPlayer.position.x, 0.1, snailPlayer.position.z);
+                        dashAimLine.rotation.y = Math.atan2(attackInput.x, attackInput.z);
+                    }
                 } else {
                     loadedModels.shellEquip.visible = true;
                     loadedModels.gun.visible = true;
+                    loadedModels.shellEquip.position.y = config.models.shellEquip.pos[1] + shellWave;
+                    loadedModels.gun.position.y = config.models.gun.pos[1] + shellWave;
+
                     if (state.isAiming) {
                         loadedModels.gun.rotation.y = Math.atan2(attackInput.x, attackInput.z) - snailPlayer.rotation.y;
-                        aimLine.visible = true;
-                        aimLine.position.set(snailPlayer.position.x, 0.01, snailPlayer.position.z);
-                        aimLine.rotation.y = Math.atan2(attackInput.x, attackInput.z);
+                        shootAimLine.visible = true;
+                        shootAimLine.position.set(snailPlayer.position.x, 0.01, snailPlayer.position.z);
+                        shootAimLine.rotation.y = Math.atan2(attackInput.x, attackInput.z);
                     } else {
                         loadedModels.gun.rotation.y = THREE.MathUtils.lerp(loadedModels.gun.rotation.y, 0, 0.04);
-                        aimLine.visible = false;
                     }
                 }
             }
