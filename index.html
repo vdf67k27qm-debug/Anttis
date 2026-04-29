@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Motion Adjusted</title>
+    <title>Snail Adventure - Stable Motion</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
         #ui-container { position: fixed; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -221,7 +221,6 @@
                 snailPlayer.rotation.y = THREE.MathUtils.lerp(snailPlayer.rotation.y, Math.atan2(moveX, moveZ), 0.15);
             }
 
-            // 慣性アニメーション調整（座標ズレを大幅に抑制）
             state.tilt = THREE.MathUtils.lerp(state.tilt, (isMoving || state.isDashing) ? 0.2 : 0, 0.1);
             const bodyWave = Math.sin(elapsed * (isMoving ? 12 : 1.5));
             const shellWave = Math.sin(elapsed * (isMoving ? 12 : 1.5) - 0.8);
@@ -241,17 +240,17 @@
 
                 const activeShell = state.currentWeapon === 'normal' ? loadedModels.shell : loadedModels.shellEquip;
                 activeShell.visible = true;
-                // 位置の慣性調整（0.5 -> 0.15に抑制）
                 activeShell.position.y = 0.25 + shellWave * 0.04;
                 activeShell.position.z = -0.25 - state.tilt * 0.15;
-                activeShell.rotation.x = -state.tilt * 0.3;
+                // 殻の傾きモーションをさらに抑制 (0.3 -> 0.1)
+                activeShell.rotation.x = -state.tilt * 0.1;
 
                 if (state.currentWeapon === 'gun') {
                     loadedModels.gun.visible = true;
-                    // 位置の慣性調整（0.4 -> 0.12に抑制）
                     loadedModels.gun.position.y = 1.2 + shellWave * 0.04;
                     loadedModels.gun.position.z = -0.3 - state.tilt * 0.12;
-                    loadedModels.gun.rotation.x = -state.tilt * 0.2;
+                    // 武器の傾きモーションをさらに抑制 (0.2 -> 0.08)
+                    loadedModels.gun.rotation.x = -state.tilt * 0.08;
 
                     if (state.isAimingAttack) {
                         loadedModels.gun.rotation.y = Math.atan2(state.attackInput.x, state.attackInput.z) - snailPlayer.rotation.y;
