@@ -36,8 +36,8 @@
 <body>
 
     <div id="ui-container">
-        <div id="move-joy" class="joy-base"><div id="move-knob" class="joystick-knob"></div></div>
-        <div id="attack-joy" class="joy-base"><div id="attack-knob" class="joystick-knob"></div></div>
+        <div id="move-joy" class="joystick-base"><div id="move-knob" class="joystick-knob"></div></div>
+        <div id="attack-joy" class="joystick-base"><div id="attack-knob" class="joystick-knob"></div></div>
         <div id="dash-btn">DASH</div>
         <button id="camera-btn" class="side-btn">視点切替</button>
         <button id="weapon-btn" class="side-btn">武器切替</button>
@@ -62,14 +62,13 @@
                 shell: { file: 'Shell.glb', pos: [0, 0.25, -0.25] },
                 shellEquip: { file: 'Shell equip.glb', pos: [0, 0.25, -0.25] },
                 gun: { file: 'Gun.glb', pos: [0, 1.2, -0.3], scale: 0.7 },
-                
-                // --- ダッシュ用シェルの詳細調整 ---
+                // --- ダッシュシェルの詳細調整項目 ---
                 dashShell: { 
                     file: 'Shell_dash.glb', 
                     scale: 1.2,
-                    pivotPos: [0, 0.65, 0],   // 回転の中心となる座標
-                    modelOffset: [0, -0.3, 0], // 中心から見たモデルのズレ調整
-                    rotateAxis: 'x',           // 回転させる軸 ('x', 'y', 'z')
+                    pivotPos: [0, 0.65, 0],   // 回転の中心位置
+                    modelOffset: [0, -0.3, 0], // 中心から見たモデルの配置ズレ
+                    rotateAxis: 'x',           // 回転軸 ('x', 'y', 'z')
                     rotateSpeed: 20.0          // 回転の速さ
                 }
             },
@@ -79,8 +78,8 @@
                 bulletSpeed: 45.0,
                 aimLineWidth: 0.30,
                 dashDuration: 0.3,
-                dashCooldown: 2.0,
-                dashSpeed: 25.0
+                dashCooldown: 3.0,
+                dashSpeed: 20.0
             }
         };
 
@@ -116,11 +115,10 @@
         scene.add(ground);
         scene.add(new THREE.GridHelper(100, 50, 0x444444, 0x444444));
 
-        // プレイヤーの親
         const snailPlayer = new THREE.Group();
         scene.add(snailPlayer);
-        
-        // ダッシュ回転用の中心点（ピボット）
+
+        // ダッシュ回転用ピボット
         const dashPivot = new THREE.Group();
         snailPlayer.add(dashPivot);
 
@@ -130,7 +128,6 @@
 
         manager.onLoad = () => { 
             state.isLoaded = true;
-            // 読み込み完了後にピボットとモデル位置をconfigから適用
             if (loadedModels.dashShell) {
                 const c = config.models.dashShell;
                 dashPivot.add(loadedModels.dashShell);
@@ -153,7 +150,7 @@
             });
         });
 
-        const bullets = [], muzzleFlashes = [], dustParticles = [];
+        const bullets = [], dustParticles = [];
         const aimLine = new THREE.Mesh(
             new THREE.CylinderGeometry(config.game.aimLineWidth, config.game.aimLineWidth, config.game.bulletRange, 8).rotateX(Math.PI/2).translate(0, 0, config.game.bulletRange/2),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 })
@@ -212,7 +209,7 @@
                 state.dashTimer -= dt;
                 if (state.dashTimer <= 0) {
                     state.isDashing = false;
-                    dashPivot.rotation.set(0,0,0); // 回転リセット
+                    dashPivot.rotation.set(0,0,0);
                 }
             }
             if (state.dashCooldownTimer > 0) {
@@ -232,16 +229,13 @@
                 createDust(0.1);
             }
 
-            const moveX = moveInput.x * currentSpeed * dt;
-            const moveZ = moveInput.z * currentSpeed * dt;
-            snailPlayer.position.x += moveX;
-            snailPlayer.position.z += moveZ;
+            snailPlayer.position.x += moveInput.x * currentSpeed * dt;
+            snailPlayer.position.z += moveInput.z * currentSpeed * dt;
 
             if (isMoving) {
                 snailPlayer.rotation.y = THREE.MathUtils.lerp(snailPlayer.rotation.y, Math.atan2(moveInput.x, moveInput.z), 0.15);
             }
 
-            // モデル表示管理
             Object.values(loadedModels).forEach(m => { if(m && m.parent === snailPlayer) m.visible = false; });
             dashPivot.visible = false;
 
@@ -249,12 +243,9 @@
                 dashPivot.visible = true;
                 const c = config.models.dashShell;
                 state.dashRot += dt * c.rotateSpeed;
-                
-                // configで指定した軸を回転させる
                 if(c.rotateAxis === 'y') dashPivot.rotation.y = state.dashRot;
                 else if(c.rotateAxis === 'z') dashPivot.rotation.z = state.dashRot;
                 else dashPivot.rotation.x = state.dashRot;
-
             } else {
                 loadedModels.body.visible = true;
                 const wave = Math.sin(elapsed * (isMoving ? 12 : 1.5));
@@ -284,7 +275,6 @@
             renderer.render(scene, camera);
         }
 
-        // --- 以下、エフェクト・射撃処理 (変更なし) ---
         function updateEffects(dt, elapsed) {
             if (state.isAiming && state.currentWeapon === 'gun' && !state.isDashing) {
                 if (elapsed - state.lastFireTime > (1.0 / config.game.fireRate)) {
@@ -301,10 +291,6 @@
             dustParticles.forEach((p, i) => {
                 p.life -= dt * 2.2; p.mesh.scale.setScalar(Math.max(0, p.life));
                 if (p.life <= 0) { scene.remove(p.mesh); dustParticles.splice(i, 1); }
-            });
-            muzzleFlashes.forEach((f, i) => {
-                f.life -= dt; f.mesh.scale.multiplyScalar(0.85);
-                if (f.life <= 0) { scene.remove(f.mesh); muzzleFlashes.splice(i, 1); }
             });
         }
 
