@@ -12,6 +12,10 @@
             background: rgba(255, 255, 255, 0.1); border: 4px solid rgba(255, 255, 255, 0.2);
             border-radius: 50%; opacity: 0.6; pointer-events: auto;
         }
+        /* ダッシュと攻撃のジョイスティックを少し小さく (110px) */
+        .small-joy { width: 110px; height: 110px; }
+        .small-joy .joystick-knob { top: 25px; left: 25px; }
+
         .joystick-knob {
             position: absolute; top: 35px; left: 35px; width: 60px; height: 60px;
             background: radial-gradient(circle, #fff, #ccc); border-radius: 50%;
@@ -37,13 +41,13 @@
 
     <div id="ui-container">
         <div id="move-joy" class="joystick-base"><div id="move-knob" class="joystick-knob"></div></div>
-        <div id="dash-joy" class="joystick-base">
+        <div id="dash-joy" class="joystick-base small-joy">
             <div id="dash-knob" class="joystick-knob">
                 <svg class="cd-svg"><circle class="cd-bg" cx="30" cy="30" r="27"/><circle id="cd-gauge" class="cd-bar" cx="30" cy="30" r="27"/></svg>
                 <span id="dash-label" style="color:#333; font-size:10px; font-weight:bold; z-index:11;">DASH</span>
             </div>
         </div>
-        <div id="attack-joy" class="joystick-base">
+        <div id="attack-joy" class="joystick-base small-joy">
             <div id="attack-knob" class="joystick-knob">
                 <span id="attack-label" style="color:#333; font-size:10px; font-weight:bold;">THROW</span>
             </div>
@@ -142,7 +146,8 @@
                 dashPivot.position.set(...config.models.dashShell.pivotPos);
             }
             loadedModels.club.position.set(5, 0.3, 5);
-            loadedModels.club.rotation.set(Math.PI/2, 0, 0); 
+            // 地面での角度調整：水平かつY軸90度
+            loadedModels.club.rotation.set(Math.PI/2, Math.PI/2, 0); 
             scene.add(loadedModels.club);
         };
         const gltfLoader = new GLTFLoader(manager);
@@ -178,12 +183,19 @@
         function setupJoy(id, knobId, onMove, onEnd) {
             const joy = document.getElementById(id), knob = document.getElementById(knobId);
             let active = false, tid = null;
-            joy.addEventListener('touchstart', (e) => { active = true; tid = e.changedTouches[0].identifier; e.preventDefault(); }, {passive: false});
+            joy.addEventListener('touchstart', (e) => { 
+                active = true; tid = e.changedTouches[0].identifier; e.preventDefault(); 
+                // ダッシュボタンが押された瞬間に装備を解除する（ラグの撤廃）
+                if (id === 'dash-joy' && state.clubState === 'equipped' && state.dashCooldownTimer <= 0) {
+                    dropClubInstantly();
+                }
+            }, {passive: false});
             window.addEventListener('touchmove', (e) => {
                 const t = Array.from(e.touches).find(v => v.identifier === tid);
                 if (!active || !t) return;
                 const r = joy.getBoundingClientRect();
-                const dx = t.clientX - (r.left + 65), dy = t.clientY - (r.top + 65);
+                const center = (id === 'move-joy') ? 65 : 55;
+                const dx = t.clientX - (r.left + center), dy = t.clientY - (r.top + center);
                 const d = Math.min(Math.sqrt(dx*dx+dy*dy), 50), ang = Math.atan2(dy, dx);
                 knob.style.transform = `translate(${Math.cos(ang)*d}px, ${Math.sin(ang)*d}px)`;
                 onMove(Math.cos(ang)*(d/50), Math.sin(ang)*(d/50), d);
@@ -195,19 +207,22 @@
             });
         }
 
+        // ダッシュボタン押下時に即時落下させる関数
+        function dropClubInstantly() {
+            state.clubState = 'thrown';
+            const club = loadedModels.club;
+            const worldPos = new THREE.Vector3();
+            club.getWorldPosition(worldPos);
+            scene.attach(club);
+            club.position.copy(worldPos);
+            state.clubVel.set(0, 0.1, 0); // その場にほぼ垂直に落とす
+        }
+
         setupJoy('move-joy', 'move-knob', (x, z) => { state.moveInput = {x, z}; }, () => { state.moveInput = {x:0,z:0}; });
         setupJoy('dash-joy', 'dash-knob', (x, z, d) => { 
             state.dashInput = {x, z}; state.isAimingDash = d > 15; 
         }, () => { 
             if (state.isAimingDash && state.dashCooldownTimer <= 0 && !state.isDashing) {
-                if (state.clubState === 'equipped') {
-                    state.clubState = 'thrown';
-                    const club = loadedModels.club;
-                    scene.attach(club);
-                    // ダッシュ時のドロップ慣性を極限まで低く修正(0.01)
-                    const dropDir = new THREE.Vector3(state.dashInput.x, 0.2, state.dashInput.z).normalize();
-                    state.clubVel.copy(dropDir).multiplyScalar(config.game.dashSpeed * 0.01); 
-                }
                 state.isDashing = true; state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown; state.dashDir = { ...state.dashInput };
             }
@@ -225,10 +240,9 @@
 
         function throwClub() {
             state.clubState = 'thrown';
-            state.throwAnimTimer = 0.2; // 伸び上がり時間
+            state.throwAnimTimer = 0.2;
             const club = loadedModels.club;
             scene.attach(club);
-            // 投げはしっかりと自然に飛ぶように力を維持
             const dir = new THREE.Vector3(state.attackInput.x, config.game.throwUpwardForce, state.attackInput.z).normalize();
             state.clubVel.copy(dir).multiplyScalar(config.game.throwForce);
             club.lookAt(club.position.clone().add(dir));
@@ -258,16 +272,28 @@
                 if (state.dashTimer <= 0) { state.isDashing = false; dashPivot.rotation.set(0,0,0); }
             }
 
-            // エイム中の移動速度をさらに遅く(0.3)
-            let speedMult = state.isAimingAttack ? 0.3 : 1.0;
+            // エイム中の移動速度をさらに低下 (0.2)
+            let speedMult = state.isAimingAttack ? 0.2 : 1.0;
             let currentSpeed = state.isDashing ? config.game.dashSpeed : (6 * speedMult);
             let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x;
             let moveZ = state.isDashing ? state.dashDir.z : state.moveInput.z;
             snailPlayer.position.x += moveX * currentSpeed * dt;
             snailPlayer.position.z += moveZ * currentSpeed * dt;
 
-            if ((isMoving && !state.isDashing) || state.isDashing) {
-                snailPlayer.rotation.y = THREE.MathUtils.lerp(snailPlayer.rotation.y, Math.atan2(moveX, moveZ), 0.15);
+            // キャラクターの向き決定（攻撃エイム時はエイム方向を優先）
+            if (state.isAimingAttack) {
+                const targetRot = Math.atan2(state.attackInput.x, state.attackInput.z);
+                snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, targetRot, 0.2);
+            } else if ((isMoving && !state.isDashing) || state.isDashing) {
+                const targetRot = Math.atan2(moveX, moveZ);
+                snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, targetRot, 0.15);
+            }
+
+            // 回転バグ防止用の角度補完関数
+            function lerpAngle(a, b, t) {
+                let diff = (b - a + Math.PI) % (Math.PI * 2) - Math.PI;
+                if (diff < -Math.PI) diff += Math.PI * 2;
+                return a + diff * t;
             }
 
             const animSpeed = isMoving ? 12 : 1.5;
@@ -291,28 +317,26 @@
                 let squashStretch = 1.0;
                 let heightOffset = 0;
                 if (state.isAimingAttack) {
-                    squashStretch = 0.7; // かがみ込み
-                    heightOffset = -0.05; // 地面にめり込まないように調整
+                    squashStretch = 0.7;
+                    heightOffset = -0.05;
                 } else if (state.throwAnimTimer > 0) {
                     state.throwAnimTimer -= dt;
-                    squashStretch = 1.3; // 伸び上がり
+                    squashStretch = 1.3;
                     heightOffset = 0.15;
                 }
 
                 loadedModels.body.scale.y = (1 + bodyWave * (isMoving ? 0.12 : 0.03)) * squashStretch;
                 loadedModels.body.position.y = heightOffset;
-                loadedModels.body.rotation.x = 0; 
-                
                 loadedModels.shell.position.y = 0.25 + shellWave * 0.04 + heightOffset;
                 loadedModels.shell.rotation.z = moveSwing;
-                loadedModels.shell.rotation.x = 0; 
                 loadedModels.shell.scale.y = squashStretch;
 
                 const club = loadedModels.club;
                 if (state.clubState === 'ground') {
                     pickupCircle.visible = true;
                     pickupCircle.position.set(club.position.x, 0.05, club.position.z);
-                    club.rotation.set(Math.PI/2, 0, 0); // 地面では必ず水平
+                    // 地面にある棍棒の向きを修正
+                    club.rotation.set(Math.PI/2, Math.PI/2, 0);
 
                     const dist = snailPlayer.position.distanceTo(club.position);
                     if (dist < 1.5) {
@@ -324,6 +348,9 @@
                         pickupGauge.geometry = new THREE.RingGeometry(0.8, 1.0, 32, 1, 0, progress * Math.PI * 2);
                         if (progress >= 1) {
                             state.clubState = 'equipped';
+                            // 装備時に位置をリセットしてから追加（吹き飛び防止）
+                            club.position.set(0,0,0);
+                            club.rotation.set(0,0,0);
                             snailPlayer.add(club);
                         }
                     } else { state.pickupTimer = 0; }
@@ -354,8 +381,7 @@
                         if (state.clubVel.length() < 1) {
                             state.clubState = 'ground';
                             state.pickupTimer = 0;
-                            // アイテム状態への移行時に角度を水平に固定
-                            club.rotation.set(Math.PI/2, 0, 0); 
+                            club.rotation.set(Math.PI/2, Math.PI/2, 0); 
                         }
                     }
                 }
