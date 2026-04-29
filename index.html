@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Physics Pro</title>
+    <title>Snail Adventure - Motion Update</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
         #ui-container { position: fixed; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -71,14 +71,13 @@
                 dashShell: { file: 'Shell_dash.glb', scale: 1.2, pivotPos: [0, 0.65, 0], modelOffset: [0, -0.3, 0], rotateSpeed: 15.0 }
             },
             items: {
-                club: { file: 'Club.glb', scale: 0.7, mass: 1.0, equipPos: [0, 1.2, -0.3], groundRot: [Math.PI/2, Math.PI/2, 0] },
-                corn: { file: 'Corn.glb', scale: 1.0, mass: 1.1, equipPos: [0, 1.2, -0.3], groundRot: [0, 0, 0] }
+                club: { file: 'Club.glb', scale: 0.7, mass: 1.2, equipPos: [0, 1.2, -0.3], groundRot: [Math.PI/2, Math.PI/2, 0] },
+                corn: { file: 'Corn.glb', scale: 1.0, mass: 0.6, equipPos: [0, 1.2, -0.3], groundRot: [0, 0, 0] }
             },
             game: {
                 dashDuration: 0.4, dashCooldown: 8.0, dashSpeed: 15.0,
                 pickupTime: 0.8, gravity: 35.0, throwUpwardForce: 0.25,
-                maxAirRot: 15.0, // 最大回転速度
-                stopFriction: 0.1 // 地面での止まりやすさ
+                maxAirRot: 15.0, stopFriction: 0.1
             }
         };
 
@@ -151,15 +150,12 @@
                 const model = gltf.scene;
                 model.traverse(n => { if(n.isMesh) { n.castShadow = true; n.receiveShadow = true; }});
                 model.scale.setScalar(info.scale);
-                
-                // アイテム状態の時、常に表示される円
                 const guide = new THREE.Mesh(
                     new THREE.RingGeometry(0.8, 1.0, 32),
                     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
                 );
                 guide.rotation.x = -Math.PI/2;
                 scene.add(guide);
-
                 itemModels[key] = { mesh: model, guide: guide, state: 'ground' };
                 model.position.set(key === 'club' ? 5 : -5, 0.3, 5);
                 model.rotation.set(...info.groundRot);
@@ -183,101 +179,73 @@
         function setupJoy(id, knobId, onMove, onEnd) {
             const joy = document.getElementById(id), knob = document.getElementById(knobId);
             let active = false, tid = null;
-            joy.addEventListener('touchstart', (e) => { 
-                active = true; tid = e.changedTouches[0].identifier; e.preventDefault(); 
-            }, {passive: false});
+            joy.addEventListener('touchstart', (e) => { active = true; tid = e.changedTouches[0].identifier; e.preventDefault(); }, {passive: false});
             window.addEventListener('touchmove', (e) => {
                 const t = Array.from(e.touches).find(v => v.identifier === tid);
                 if (!active || !t) return;
-                const r = joy.getBoundingClientRect();
-                const center = (id === 'move-joy') ? 65 : 55;
+                const r = joy.getBoundingClientRect(), center = (id === 'move-joy') ? 65 : 55;
                 const dx = t.clientX - (r.left + center), dy = t.clientY - (r.top + center);
                 const d = Math.min(Math.sqrt(dx*dx+dy*dy), 50), ang = Math.atan2(dy, dx);
                 knob.style.transform = `translate(${Math.cos(ang)*d}px, ${Math.sin(ang)*d}px)`;
                 onMove(Math.cos(ang)*(d/50), Math.sin(ang)*(d/50), d);
             }, {passive: false});
-            window.addEventListener('touchend', (e) => {
-                if (Array.from(e.changedTouches).some(v => v.identifier === tid)) {
-                    active = false; knob.style.transform = "translate(0,0)"; onEnd();
-                }
-            });
+            window.addEventListener('touchend', (e) => { if (Array.from(e.changedTouches).some(v => v.identifier === tid)) { active = false; knob.style.transform = "translate(0,0)"; onEnd(); }});
         }
 
-        // ダッシュ・交換時にアイテムをパージする（微回転あり）
         function purgeItem() {
             if (!state.equippedKey) return;
-            const key = state.equippedKey;
-            const item = itemModels[key];
+            const key = state.equippedKey, item = itemModels[key];
             item.state = 'thrown';
             const worldPos = new THREE.Vector3();
             item.mesh.getWorldPosition(worldPos);
             scene.attach(item.mesh);
             item.mesh.position.copy(worldPos);
-            // 真上にわずかに跳ねて、ゆっくり回る
             state.itemVel.set(0, 2, 0);
             state.itemRotVel = 2.0; 
             state.equippedKey = null;
         }
 
         function throwItem() {
-            const key = state.equippedKey;
-            const item = itemModels[key];
-            const itemConf = config.items[key];
+            const key = state.equippedKey, item = itemModels[key], itemConf = config.items[key];
             item.state = 'thrown';
             state.throwAnimTimer = 0.2;
             scene.attach(item.mesh);
-            
             const v0 = 30.0 / itemConf.mass;
             const dir = new THREE.Vector3(state.attackInput.x, config.game.throwUpwardForce, state.attackInput.z).normalize();
             state.itemVel.copy(dir).multiplyScalar(v0);
-            state.itemRotVel = config.game.maxAirRot; // 全力投擲時は最大回転
-            
+            state.itemRotVel = config.game.maxAirRot;
             item.mesh.lookAt(item.mesh.position.clone().add(dir));
             state.equippedKey = null;
         }
 
         function calculateLandingDist(key) {
-            const itemConf = config.items[key];
-            const v0 = 30.0 / itemConf.mass;
+            const itemConf = config.items[key], v0 = 30.0 / itemConf.mass;
             const dir = new THREE.Vector3(state.attackInput.x, config.game.throwUpwardForce, state.attackInput.z).normalize();
-            const vx = new THREE.Vector2(dir.x, dir.z).length() * v0;
-            const vy = dir.y * v0;
-            const g = config.game.gravity;
-            const h = 1.2 - 0.3; // 射出高度 - 地面停止高度
-            const t = (vy + Math.sqrt(vy*vy + 2*g*h)) / g;
-            return vx * t;
+            const vx = new THREE.Vector2(dir.x, dir.z).length() * v0, vy = dir.y * v0, g = config.game.gravity, h = 0.9;
+            return vx * ((vy + Math.sqrt(vy*vy + 2*g*h)) / g);
         }
 
         setupJoy('move-joy', 'move-knob', (x, z) => { state.moveInput = {x, z}; }, () => { state.moveInput = {x:0,z:0}; });
-        setupJoy('dash-joy', 'dash-knob', (x, z, d) => { 
-            state.dashInput = {x, z}; state.isAimingDash = d > 15; 
-        }, () => { 
+        setupJoy('dash-joy', 'dash-knob', (x, z, d) => { state.dashInput = {x, z}; state.isAimingDash = d > 15; }, () => { 
             if (state.isAimingDash && state.dashCooldownTimer <= 0 && !state.isDashing) {
-                purgeItem(); // ダッシュ開始と同時にアイテム切り離し
-                state.isDashing = true; state.dashTimer = config.game.dashDuration;
+                purgeItem(); state.isDashing = true; state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown; state.dashDir = { ...state.dashInput };
             }
             state.isAimingDash = false; 
         });
-        setupJoy('attack-joy', 'attack-knob', (x, z, d) => { 
-            state.attackInput = {x, z}; 
-            if(state.equippedKey) state.isAimingAttack = d > 15; 
-        }, () => { 
+        setupJoy('attack-joy', 'attack-knob', (x, z, d) => { state.attackInput = {x, z}; if(state.equippedKey) state.isAimingAttack = d > 15; }, () => { 
             if (state.isAimingAttack && state.equippedKey) throwItem();
             state.isAimingAttack = false; 
         });
 
         document.getElementById('camera-btn').addEventListener('click', () => { state.camMode = (state.camMode + 1) % 3; });
 
-        const clock = new THREE.Clock();
-        const camOffsets = [{h:7, d:6}, {h:12, d:10}, {h:22, d:18}];
+        const clock = new THREE.Clock(), camOffsets = [{h:7, d:6}, {h:12, d:10}, {h:22, d:18}];
 
         function animate() {
             requestAnimationFrame(animate);
             if (!state.isLoaded) return;
-            const dt = clock.getDelta(), elapsed = clock.getElapsedTime();
-            const isMoving = Math.abs(state.moveInput.x) > 0.1 || Math.abs(state.moveInput.z) > 0.1;
-
+            const dt = clock.getDelta(), elapsed = clock.getElapsedTime(), isMoving = Math.abs(state.moveInput.x) > 0.1 || Math.abs(state.moveInput.z) > 0.1;
             const gauge = document.getElementById('cd-gauge');
             if (state.dashCooldownTimer > 0) {
                 state.dashCooldownTimer -= dt;
@@ -292,42 +260,36 @@
 
             let speedMult = state.isAimingAttack ? 0.2 : 1.0;
             let currentSpeed = state.isDashing ? config.game.dashSpeed : (6 * speedMult);
-            let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x;
-            let moveZ = state.isDashing ? state.dashDir.z : state.moveInput.z;
+            let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x, moveZ = state.isDashing ? state.dashDir.z : state.moveInput.z;
             snailPlayer.position.x += moveX * currentSpeed * dt;
             snailPlayer.position.z += moveZ * currentSpeed * dt;
 
             const lerpAngle = (a, b, t) => {
                 let diff = (b - a + Math.PI) % (Math.PI * 2) - Math.PI;
-                if (diff < -Math.PI) diff += Math.PI * 2;
                 return a + diff * t;
             };
-            if (state.isAimingAttack) {
-                snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, Math.atan2(state.attackInput.x, state.attackInput.z), 0.2);
-            } else if (isMoving || state.isDashing) {
-                snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, Math.atan2(moveX, moveZ), 0.15);
-            }
+            if (state.isAimingAttack) snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, Math.atan2(state.attackInput.x, state.attackInput.z), 0.2);
+            else if (isMoving || state.isDashing) snailPlayer.rotation.y = lerpAngle(snailPlayer.rotation.y, Math.atan2(moveX, moveZ), 0.15);
 
             loadedModels.body.visible = !state.isDashing;
             loadedModels.shell.visible = !state.isDashing;
             dashPivot.visible = state.isDashing;
-            throwAimLine.visible = false;
-            dashAimLine.visible = false;
-            pickupGauge.visible = false;
+            throwAimLine.visible = dashAimLine.visible = pickupGauge.visible = false;
 
             if (state.isDashing) {
                 state.dashRot += dt * config.models.dashShell.rotateSpeed;
                 dashPivot.rotation.x = state.dashRot;
                 if (Math.random() > 0.2) createDust(0.2);
             } else {
-                let squashStretch = 1.0, heightOffset = 0;
-                const animSpeed = isMoving ? 12 : 1.5;
-                const bodyWave = Math.sin(elapsed * animSpeed);
-                const shellWave = Math.sin(elapsed * animSpeed - 0.8);
-                const moveSwing = isMoving ? Math.sin(elapsed * 10) * 0.05 : 0;
+                // エイム中はしゃがまない(squashStretch=1.0) ＆ 移動モーションを0.5倍に抑制
+                let squashStretch = (state.throwAnimTimer > 0) ? 1.3 : 1.0;
+                let heightOffset = (state.throwAnimTimer > 0) ? 0.15 : 0;
+                let motionRedux = state.isAimingAttack ? 0.5 : 1.0;
 
-                if (state.isAimingAttack) { squashStretch = 0.7; heightOffset = -0.05; }
-                else if (state.throwAnimTimer > 0) { state.throwAnimTimer -= dt; squashStretch = 1.3; heightOffset = 0.15; }
+                const animSpeed = isMoving ? 12 : 1.5;
+                const bodyWave = Math.sin(elapsed * animSpeed) * motionRedux;
+                const shellWave = Math.sin(elapsed * animSpeed - 0.8) * motionRedux;
+                const moveSwing = (isMoving ? Math.sin(elapsed * 10) * 0.05 : 0) * motionRedux;
 
                 loadedModels.body.scale.y = (1 + bodyWave * (isMoving ? 0.12 : 0.03)) * squashStretch;
                 loadedModels.body.position.y = heightOffset;
@@ -338,50 +300,34 @@
                 Object.entries(itemModels).forEach(([key, item]) => {
                     const itemConf = config.items[key];
                     if (item.state === 'ground') {
-                        item.guide.visible = true;
-                        item.guide.position.set(item.mesh.position.x, 0.05, item.mesh.position.z);
+                        item.guide.visible = true; item.guide.position.set(item.mesh.position.x, 0.05, item.mesh.position.z);
                         if (snailPlayer.position.distanceTo(item.mesh.position) < 1.5) state.nearbyItemKey = key;
-                    } else { item.guide.visible = false; }
+                    } else item.guide.visible = false;
 
                     if (item.state === 'thrown') {
                         state.itemVel.y -= config.game.gravity * dt;
                         item.mesh.position.add(state.itemVel.clone().multiplyScalar(dt));
-                        // 回転に減衰をかける（物理っぽさ）
-                        state.itemRotVel *= 0.98;
-                        item.mesh.rotateX(state.itemRotVel * dt);
-                        
+                        state.itemRotVel *= 0.98; item.mesh.rotateX(state.itemRotVel * dt);
                         if (item.mesh.position.y < 0.3) {
-                            item.mesh.position.y = 0.3;
-                            // 接地時にバウンドと速度急減衰（エイム線で止まるように）
-                            state.itemVel.y *= -0.3; 
-                            state.itemVel.x *= config.game.stopFriction; 
-                            state.itemVel.z *= config.game.stopFriction;
+                            item.mesh.position.y = 0.3; state.itemVel.y *= -0.3; 
+                            state.itemVel.x *= config.game.stopFriction; state.itemVel.z *= config.game.stopFriction;
                             state.itemRotVel *= 0.5;
-                            if (state.itemVel.length() < 0.5) {
-                                item.state = 'ground';
-                                item.mesh.rotation.set(...itemConf.groundRot);
-                            }
+                            if (state.itemVel.length() < 0.5) { item.state = 'ground'; item.mesh.rotation.set(...itemConf.groundRot); }
                         }
                     }
                 });
 
                 if (state.nearbyItemKey) {
-                    state.pickupTimer += dt;
-                    pickupGauge.visible = true;
+                    state.pickupTimer += dt; pickupGauge.visible = true;
                     const itemPos = itemModels[state.nearbyItemKey].mesh.position;
                     pickupGauge.position.set(itemPos.x, 0.06, itemPos.z);
                     const progress = Math.min(state.pickupTimer / config.game.pickupTime, 1);
-                    pickupGauge.geometry.dispose();
-                    pickupGauge.geometry = new THREE.RingGeometry(0.8, 1.0, 32, 1, 0, progress * Math.PI * 2);
+                    pickupGauge.geometry.dispose(); pickupGauge.geometry = new THREE.RingGeometry(0.8, 1.0, 32, 1, 0, progress * Math.PI * 2);
                     if (progress >= 1) {
-                        purgeItem();
-                        state.equippedKey = state.nearbyItemKey;
-                        const item = itemModels[state.equippedKey];
-                        item.state = 'equipped';
-                        item.mesh.position.set(0,0,0);
-                        item.mesh.rotation.set(0,0,0);
-                        snailPlayer.add(item.mesh);
-                        state.pickupTimer = 0;
+                        purgeItem(); state.equippedKey = state.nearbyItemKey;
+                        const item = itemModels[state.equippedKey]; item.state = 'equipped';
+                        item.mesh.position.set(0,0,0); item.mesh.rotation.set(0,0,0);
+                        snailPlayer.add(item.mesh); state.pickupTimer = 0;
                     }
                 } else state.pickupTimer = 0;
 
@@ -391,15 +337,13 @@
                     item.mesh.rotation.set(moveSwing * 2, 0, moveSwing);
                     if (state.isAimingAttack) {
                         const dist = calculateLandingDist(state.equippedKey);
-                        throwAimLine.visible = true;
-                        throwAimLine.scale.z = dist;
+                        throwAimLine.visible = true; throwAimLine.scale.z = dist;
                         throwAimLine.position.set(snailPlayer.position.x, 0.01, snailPlayer.position.z);
                         throwAimLine.rotation.y = Math.atan2(state.attackInput.x, state.attackInput.z);
                     }
                 }
                 if (state.isAimingDash && state.dashCooldownTimer <= 0) {
-                    dashAimLine.visible = true;
-                    dashAimLine.position.set(snailPlayer.position.x, 0.1, snailPlayer.position.z);
+                    dashAimLine.visible = true; dashAimLine.position.set(snailPlayer.position.x, 0.1, snailPlayer.position.z);
                     dashAimLine.rotation.y = Math.atan2(state.dashInput.x, state.dashInput.z);
                 }
             }
@@ -409,8 +353,7 @@
             });
             const cfg = camOffsets[state.camMode];
             camera.position.lerp(new THREE.Vector3(snailPlayer.position.x, cfg.h, snailPlayer.position.z + cfg.d), 0.1);
-            camera.lookAt(snailPlayer.position);
-            renderer.render(scene, camera);
+            camera.lookAt(snailPlayer.position); renderer.render(scene, camera);
         }
 
         function createDust(size) {
@@ -419,10 +362,7 @@
             scene.add(dust); dustParticles.push({mesh: dust, life: 1.0});
         }
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
         animate();
     </script>
 </body>
