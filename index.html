@@ -73,10 +73,10 @@
             },
             game: {
                 dashDuration: 0.4, dashCooldown: 8.0, dashSpeed: 15.0, dashAimLineWidth: 0.6,
-                clubPickupTime: 1.2,      // 拾うまでのゲージ秒数
-                throwAimLength: 12.0,    // エイム線の長さ
-                throwAimWidth: 0.4,      // エイム線の太さ
-                throwForce: 25.0         // 投擲距離/速度
+                clubPickupTime: 1.2,
+                throwAimLength: 12.0,
+                throwAimWidth: 0.4,
+                throwForce: 25.0
             }
         };
 
@@ -85,7 +85,7 @@
             isAimingDash: false, isAimingAttack: false,
             isDashing: false, dashTimer: 0, dashCooldownTimer: 0, dashRot: 0,
             moveInput: { x: 0, z: 0 }, dashInput: { x: 0, z: 0 }, attackInput: { x: 0, z: 0 },
-            hasClub: false, clubState: 'ground', // 'ground', 'equipping', 'equipped', 'thrown'
+            clubState: 'ground', // 'ground', 'equipped', 'thrown'
             pickupTimer: 0,
             clubVel: new THREE.Vector3(),
             clubRotVel: new THREE.Vector3()
@@ -115,13 +115,11 @@
         const dashPivot = new THREE.Group();
         snailPlayer.add(dashPivot);
 
-        // アイテムガイドサークル
         const pickupCircle = new THREE.Mesh(
             new THREE.RingGeometry(0.8, 1.0, 32),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
         );
         pickupCircle.rotation.x = -Math.PI/2;
-        pickupCircle.position.y = 0.05;
         scene.add(pickupCircle);
 
         const pickupGauge = new THREE.Mesh(
@@ -129,7 +127,6 @@
             new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide })
         );
         pickupGauge.rotation.x = -Math.PI/2;
-        pickupGauge.position.y = 0.06;
         scene.add(pickupGauge);
 
         const loadedModels = {};
@@ -141,7 +138,6 @@
                 loadedModels.dashShell.position.set(...config.models.dashShell.modelOffset); 
                 dashPivot.position.set(...config.models.dashShell.pivotPos);
             }
-            // 初期配置
             loadedModels.club.position.set(5, 0.3, 5);
             scene.add(loadedModels.club);
         };
@@ -162,14 +158,12 @@
 
         const dustParticles = [];
 
-        // 投擲エイム線
         const throwAimLine = new THREE.Mesh(
             new THREE.CylinderGeometry(config.game.throwAimWidth, config.game.throwAimWidth, config.game.throwAimLength, 8).rotateX(Math.PI/2).translate(0, 0, config.game.throwAimLength/2),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 })
         );
         scene.add(throwAimLine);
 
-        // ダッシュエイム線
         const dashDist = config.game.dashSpeed * config.game.dashDuration;
         const dashAimLine = new THREE.Mesh(
             new THREE.CylinderGeometry(config.game.dashAimLineWidth, config.game.dashAimLineWidth, dashDist, 8).rotateX(Math.PI/2).translate(0, 0, dashDist/2),
@@ -198,7 +192,9 @@
         }
 
         setupJoy('move-joy', 'move-knob', (x, z) => { state.moveInput = {x, z}; }, () => { state.moveInput = {x:0,z:0}; });
-        setupJoy('dash-joy', 'dash-knob', (x, z, d) => { state.dashInput = {x, z}; state.isAimingDash = d > 15; }, () => { 
+        setupJoy('dash-joy', 'dash-knob', (x, z, d) => { 
+            state.dashInput = {x, z}; state.isAimingDash = d > 15; 
+        }, () => { 
             if (state.isAimingDash && state.dashCooldownTimer <= 0 && !state.isDashing) {
                 state.isDashing = true; state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown; state.dashDir = { ...state.dashInput };
@@ -233,7 +229,6 @@
             const dt = clock.getDelta(), elapsed = clock.getElapsedTime();
             const isMoving = Math.abs(state.moveInput.x) > 0.1 || Math.abs(state.moveInput.z) > 0.1;
 
-            // UI Dash
             const gauge = document.getElementById('cd-gauge');
             const label = document.getElementById('dash-label');
             if (state.dashCooldownTimer > 0) {
@@ -249,7 +244,6 @@
                 if (state.dashTimer <= 0) { state.isDashing = false; dashPivot.rotation.set(0,0,0); }
             }
 
-            // Move
             let currentSpeed = state.isDashing ? config.game.dashSpeed : 6;
             let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x;
             let moveZ = state.isDashing ? state.dashDir.z : state.moveInput.z;
@@ -263,7 +257,6 @@
             const bodyWave = Math.sin(elapsed * (isMoving ? 12 : 1.5));
             const shellWave = Math.sin(elapsed * (isMoving ? 12 : 1.5) - 0.8);
 
-            // Visibility
             loadedModels.body.visible = !state.isDashing;
             loadedModels.shell.visible = !state.isDashing;
             dashPivot.visible = state.isDashing;
@@ -278,9 +271,10 @@
                 if (Math.random() > 0.2) createDust(0.2);
             } else {
                 loadedModels.body.scale.y = 1 + bodyWave * (isMoving ? 0.12 : 0.03);
+                loadedModels.body.rotation.x = 0;
                 loadedModels.shell.position.y = 0.25 + shellWave * 0.04;
+                loadedModels.shell.rotation.x = 0;
 
-                // Club State Logic
                 const club = loadedModels.club;
                 if (state.clubState === 'ground') {
                     pickupCircle.visible = true;
@@ -301,6 +295,7 @@
                         state.pickupTimer = 0;
                     }
                 } else if (state.clubState === 'equipped') {
+                    club.visible = true;
                     club.position.set(config.models.club.equipPos[0], config.models.club.equipPos[1] + shellWave * 0.04, config.models.club.equipPos[2]);
                     club.rotation.set(0,0,0);
                     if (state.isAimingAttack) {
@@ -309,7 +304,8 @@
                         throwAimLine.rotation.y = Math.atan2(state.attackInput.x, state.attackInput.z);
                     }
                 } else if (state.clubState === 'thrown') {
-                    state.clubVel.y -= 35 * dt; // gravity
+                    club.visible = true;
+                    state.clubVel.y -= 35 * dt;
                     club.position.add(state.clubVel.clone().multiplyScalar(dt));
                     club.rotation.x += state.clubRotVel.x * dt;
                     club.rotation.y += state.clubRotVel.y * dt;
@@ -317,7 +313,7 @@
 
                     if (club.position.y < 0.3) {
                         club.position.y = 0.3;
-                        state.clubVel.y *= -0.4; // bounce
+                        state.clubVel.y *= -0.4;
                         state.clubVel.x *= 0.8;
                         state.clubVel.z *= 0.8;
                         if (state.clubVel.length() < 1) {
@@ -335,7 +331,6 @@
                 if (isMoving && Math.random() > 0.8) createDust(0.1);
             }
 
-            // Particles
             dustParticles.forEach((p, i) => {
                 p.life -= dt * 2.2; p.mesh.scale.setScalar(Math.max(0, p.life));
                 if (p.life <= 0) { scene.remove(p.mesh); dustParticles.splice(i, 1); }
