@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Snail Adventure - Multi-Item System</title>
+    <title>Snail Adventure - Multi-Item Pro</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
         #ui-container { position: fixed; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -14,7 +14,6 @@
         }
         .small-joy { width: 110px; height: 110px; }
         .small-joy .joystick-knob { top: 25px; left: 25px; }
-
         .joystick-knob {
             position: absolute; top: 35px; left: 35px; width: 60px; height: 60px;
             background: radial-gradient(circle, #fff, #ccc); border-radius: 50%;
@@ -23,11 +22,9 @@
         #move-joy { bottom: 50px; left: 40px; }
         #dash-joy { bottom: 180px; right: 40px; border-color: rgba(255, 100, 100, 0.3); }
         #attack-joy { bottom: 50px; right: 40px; border-color: rgba(100, 200, 255, 0.3); }
-        
         .cd-svg { width: 60px; height: 60px; transform: rotate(-90deg); position: absolute; pointer-events: none; }
         .cd-bg { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 6; }
         .cd-bar { fill: none; stroke: #fff; stroke-width: 6; stroke-dasharray: 170; stroke-dashoffset: 170; }
-
         .side-btn {
             position: absolute; left: 20px; width: 60px; height: 45px;
             background: rgba(0,0,0,0.6); color: white; border: 1px solid #fff;
@@ -73,17 +70,13 @@
                 shell: { file: 'Shell.glb', pos: [0, 0.25, -0.25] },
                 dashShell: { file: 'Shell_dash.glb', scale: 1.2, pivotPos: [0, 0.65, 0], modelOffset: [0, -0.3, 0], rotateAxis: 'x', rotateSpeed: 15.0 }
             },
-            // アイテムごとの設定（ここに追加するだけでOK）
             items: {
                 club: { file: 'Club.glb', scale: 0.7, mass: 1.2, equipPos: [0, 1.2, -0.3], groundRot: [Math.PI/2, Math.PI/2, 0] },
                 corn: { file: 'Corn.glb', scale: 1.0, mass: 0.6, equipPos: [0, 1.2, -0.3], groundRot: [0, 0, 0] }
             },
             game: {
                 dashDuration: 0.4, dashCooldown: 8.0, dashSpeed: 15.0, dashAimLineWidth: 0.6,
-                pickupTime: 0.8,
-                gravity: 35.0,
-                throwUpwardForce: 0.2, // 投げ上げの初期ベクトル垂直成分
-                clubAirRotateSpeed: 20.0
+                pickupTime: 0.8, gravity: 35.0, throwUpwardForce: 0.2, clubAirRotateSpeed: 20.0
             }
         };
 
@@ -92,11 +85,8 @@
             isAimingDash: false, isAimingAttack: false,
             isDashing: false, dashTimer: 0, dashCooldownTimer: 0, dashRot: 0,
             moveInput: { x: 0, z: 0 }, dashInput: { x: 0, z: 0 }, attackInput: { x: 0, z: 0 },
-            equippedKey: null,
-            pickupTimer: 0,
-            nearbyItemKey: null,
-            itemVel: new THREE.Vector3(),
-            throwAnimTimer: 0 
+            equippedKey: null, pickupTimer: 0, nearbyItemKey: null,
+            itemVel: new THREE.Vector3(), throwAnimTimer: 0 
         };
 
         const scene = new THREE.Scene();
@@ -123,13 +113,6 @@
         const dashPivot = new THREE.Group();
         snailPlayer.add(dashPivot);
 
-        const pickupCircle = new THREE.Mesh(
-            new THREE.RingGeometry(0.8, 1.0, 32),
-            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
-        );
-        pickupCircle.rotation.x = -Math.PI/2;
-        scene.add(pickupCircle);
-
         const pickupGauge = new THREE.Mesh(
             new THREE.RingGeometry(0.8, 1.0, 32, 1, 0, 0),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
@@ -143,7 +126,6 @@
         manager.onLoad = () => { state.isLoaded = true; };
         const gltfLoader = new GLTFLoader(manager);
 
-        // 基本モデルロード
         Object.entries(config.models).forEach(([key, info]) => {
             gltfLoader.load(info.file, (gltf) => {
                 const model = gltf.scene;
@@ -162,14 +144,22 @@
             });
         });
 
-        // アイテムロード
+        // アイテムロード & 各アイテム専用の地面円
         Object.entries(config.items).forEach(([key, info]) => {
             gltfLoader.load(info.file, (gltf) => {
                 const model = gltf.scene;
                 model.traverse(n => { if(n.isMesh) { n.castShadow = true; n.receiveShadow = true; }});
                 model.scale.setScalar(info.scale);
-                itemModels[key] = { mesh: model, state: 'ground' };
-                // 初期配置
+                
+                // アイテム状態の時、常に表示される円
+                const circle = new THREE.Mesh(
+                    new THREE.RingGeometry(0.8, 1.0, 32),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+                );
+                circle.rotation.x = -Math.PI/2;
+                scene.add(circle);
+
+                itemModels[key] = { mesh: model, circle: circle, state: 'ground' };
                 model.position.set(key === 'club' ? 5 : -5, 0.3, 5);
                 model.rotation.set(...info.groundRot);
                 scene.add(model);
@@ -177,10 +167,8 @@
         });
 
         const dustParticles = [];
-
-        // 投擲エイム線（シリンダー）
         const throwAimLine = new THREE.Mesh(
-            new THREE.CylinderGeometry(config.game.throwAimWidth, config.game.throwAimWidth, 1, 8).rotateX(Math.PI/2).translate(0, 0, 0.5),
+            new THREE.CylinderGeometry(0.5, 0.5, 1, 8).rotateX(Math.PI/2).translate(0, 0, 0.5),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 })
         );
         scene.add(throwAimLine);
@@ -197,9 +185,6 @@
             let active = false, tid = null;
             joy.addEventListener('touchstart', (e) => { 
                 active = true; tid = e.changedTouches[0].identifier; e.preventDefault(); 
-                if (id === 'dash-joy' && state.equippedKey && state.dashCooldownTimer <= 0) {
-                    dropItemInstantly();
-                }
             }, {passive: false});
             window.addEventListener('touchmove', (e) => {
                 const t = Array.from(e.touches).find(v => v.identifier === tid);
@@ -219,6 +204,7 @@
         }
 
         function dropItemInstantly() {
+            if (!state.equippedKey) return;
             const key = state.equippedKey;
             const item = itemModels[key];
             item.state = 'thrown';
@@ -235,6 +221,8 @@
             state.dashInput = {x, z}; state.isAimingDash = d > 15; 
         }, () => { 
             if (state.isAimingDash && state.dashCooldownTimer <= 0 && !state.isDashing) {
+                // ダッシュ確定時のみアイテムを落下させる
+                if (state.equippedKey) dropItemInstantly();
                 state.isDashing = true; state.dashTimer = config.game.dashDuration;
                 state.dashCooldownTimer = config.game.dashCooldown; state.dashDir = { ...state.dashInput };
             }
@@ -257,18 +245,14 @@
             item.state = 'thrown';
             state.throwAnimTimer = 0.2;
             scene.attach(item.mesh);
-            
-            // 質量に基づいた初速計算
             const baseForce = 30.0; 
             const launchPower = baseForce / itemConf.mass;
             const dir = new THREE.Vector3(state.attackInput.x, config.game.throwUpwardForce, state.attackInput.z).normalize();
             state.itemVel.copy(dir).multiplyScalar(launchPower);
-            
             item.mesh.lookAt(item.mesh.position.clone().add(dir));
             state.equippedKey = null;
         }
 
-        // 物理計算に基づく着地距離の予測（エイム線用）
         function calculateLandingDist(key) {
             const itemConf = config.items[key];
             const baseForce = 30.0;
@@ -277,8 +261,7 @@
             const vx = new THREE.Vector2(dir.x, dir.z).length() * v0;
             const vy = dir.y * v0;
             const g = config.game.gravity;
-            const h = 1.2; // 装備時の高さ
-            // 滞空時間 t: h + vy*t - 0.5*g*t^2 = 0
+            const h = 1.2;
             const t = (vy + Math.sqrt(vy*vy + 2*g*h)) / g;
             return vx * t;
         }
@@ -292,7 +275,6 @@
             const dt = clock.getDelta(), elapsed = clock.getElapsedTime();
             const isMoving = Math.abs(state.moveInput.x) > 0.1 || Math.abs(state.moveInput.z) > 0.1;
 
-            // UI更新
             const gauge = document.getElementById('cd-gauge');
             const label = document.getElementById('dash-label');
             if (state.dashCooldownTimer > 0) {
@@ -306,7 +288,6 @@
                 if (state.dashTimer <= 0) { state.isDashing = false; dashPivot.rotation.set(0,0,0); }
             }
 
-            // 移動
             let speedMult = state.isAimingAttack ? 0.2 : 1.0;
             let currentSpeed = state.isDashing ? config.game.dashSpeed : (6 * speedMult);
             let moveX = state.isDashing ? state.dashDir.x : state.moveInput.x;
@@ -314,7 +295,6 @@
             snailPlayer.position.x += moveX * currentSpeed * dt;
             snailPlayer.position.z += moveZ * currentSpeed * dt;
 
-            // 向き補間
             const lerpAngle = (a, b, t) => {
                 let diff = (b - a + Math.PI) % (Math.PI * 2) - Math.PI;
                 if (diff < -Math.PI) diff += Math.PI * 2;
@@ -336,7 +316,6 @@
             dashPivot.visible = state.isDashing;
             throwAimLine.visible = false;
             dashAimLine.visible = false;
-            pickupCircle.visible = false;
             pickupGauge.visible = false;
 
             if (state.isDashing) {
@@ -354,18 +333,21 @@
                 loadedModels.shell.rotation.z = moveSwing;
                 loadedModels.shell.scale.y = squashStretch;
 
-                // アイテムのロジック
                 state.nearbyItemKey = null;
                 Object.entries(itemModels).forEach(([key, item]) => {
                     const itemConf = config.items[key];
                     if (item.state === 'ground') {
+                        // アイテム状態の時、常に円を表示
+                        item.circle.visible = true;
+                        item.circle.position.set(item.mesh.position.x, 0.05, item.mesh.position.z);
+                        
                         const dist = snailPlayer.position.distanceTo(item.mesh.position);
-                        if (dist < 1.5) {
-                            state.nearbyItemKey = key;
-                            pickupCircle.visible = true;
-                            pickupCircle.position.set(item.mesh.position.x, 0.05, item.mesh.position.z);
-                        }
-                    } else if (item.state === 'thrown') {
+                        if (dist < 1.5) state.nearbyItemKey = key;
+                    } else {
+                        item.circle.visible = false;
+                    }
+
+                    if (item.state === 'thrown') {
                         state.itemVel.y -= config.game.gravity * dt;
                         item.mesh.position.add(state.itemVel.clone().multiplyScalar(dt));
                         item.mesh.rotateX(config.game.clubAirRotateSpeed * dt);
@@ -380,7 +362,6 @@
                     }
                 });
 
-                // 回収・交換処理
                 if (state.nearbyItemKey) {
                     state.pickupTimer += dt;
                     pickupGauge.visible = true;
@@ -391,7 +372,7 @@
                     pickupGauge.geometry = new THREE.RingGeometry(0.8, 1.0, 32, 1, 0, progress * Math.PI * 2);
                     
                     if (progress >= 1) {
-                        if (state.equippedKey) dropItemInstantly(); // 交換
+                        if (state.equippedKey) dropItemInstantly();
                         state.equippedKey = state.nearbyItemKey;
                         const item = itemModels[state.equippedKey];
                         item.state = 'equipped';
@@ -402,7 +383,6 @@
                     }
                 } else { state.pickupTimer = 0; }
 
-                // 装備中アイテム表示
                 if (state.equippedKey) {
                     const item = itemModels[state.equippedKey];
                     const itemConf = config.items[state.equippedKey];
@@ -416,7 +396,6 @@
                         throwAimLine.rotation.y = Math.atan2(state.attackInput.x, state.attackInput.z);
                     }
                 }
-
                 if (state.isAimingDash && state.dashCooldownTimer <= 0) {
                     dashAimLine.visible = true;
                     dashAimLine.position.set(snailPlayer.position.x, 0.1, snailPlayer.position.z);
@@ -424,12 +403,10 @@
                 }
                 if (isMoving && Math.random() > 0.8) createDust(0.1);
             }
-
             dustParticles.forEach((p, i) => {
                 p.life -= dt * 2.2; p.mesh.scale.setScalar(Math.max(0, p.life));
                 if (p.life <= 0) { scene.remove(p.mesh); dustParticles.splice(i, 1); }
             });
-
             const cfg = camOffsets[state.camMode];
             camera.position.lerp(new THREE.Vector3(snailPlayer.position.x, cfg.h, snailPlayer.position.z + cfg.d), 0.1);
             camera.lookAt(snailPlayer.position);
