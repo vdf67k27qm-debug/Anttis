@@ -3,15 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Physics - Adjusted Limbs</title>
+    <title>Pig Bunny - Super Torque Edition</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
-        #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #111; touch-action: none; }
+        #joystick-wrapper {
+            position: absolute; bottom: 40px; left: 40px;
+            width: 100px; height: 100px; background: rgba(255,255,255,0.1);
+            border-radius: 50%; border: 2px solid rgba(255,255,255,0.2);
+        }
+        #joystick {
+            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
+            background: #ff4488; border-radius: 50%; transform: translate(-50%, -50%);
+        }
     </style>
 </head>
 <body>
 
-<div id="info">物理テスト：指定された数値で腕と手を配置しました。</div>
+<div id="joystick-wrapper"><div id="joystick"></div></div>
 
 <script type="importmap">
     {
@@ -26,103 +34,133 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    // --- シーン基本設定 ---
+    // --- シーン設定 ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x222233);
+    scene.background = new THREE.Color(0x87ceeb);
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
     sun.position.set(5, 10, 5);
     scene.add(sun);
 
-    // --- 地面 ---
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20), 
-        new THREE.MeshPhongMaterial({ color: 0x444444 })
-    );
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0x55aa55 }));
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
-    scene.add(new THREE.GridHelper(20, 20));
+    scene.add(new THREE.GridHelper(100, 50, 0x448844, 0x448844));
 
-    // --- キャラクター構造 ---
-    const player = new THREE.Group();
-    player.position.y = 10; 
+    // --- キャラクター構造（調整済みの数値を使用） ---
+    const player = new THREE.Group(); // 位置制御用
+    const rotPivot = new THREE.Group(); // 回転（トルク）用
+    player.position.y = 5;
     scene.add(player);
+    player.add(rotPivot);
 
-    // パーツ用グループ
     const bodyGroup = new THREE.Group();
-    const armL = new THREE.Group();
-    const armR = new THREE.Group();
-    const handL = new THREE.Group();
-    const handR = new THREE.Group();
-    
-    player.add(bodyGroup, armL, armR, handL, handR);
+    const armL = new THREE.Group(); const armR = new THREE.Group();
+    const handL = new THREE.Group(); const handR = new THREE.Group();
+    rotPivot.add(bodyGroup, armL, armR, handL, handR);
 
-    // --- 調整数値の適用 ---
-    const POS = {
-        arm:  { x: 0.35, y: 0.75, z: 0.49 },
-        hand: { x: 0.35, y: 0.75, z: 0.8 }
-    };
-
-    // 左右対称に配置
+    // デバッグ数値の適用
+    const POS = { arm: { x: 0.35, y: 0.75, z: 0.49 }, hand: { x: 0.35, y: 0.75, z: 0.8 } };
     armL.position.set(-POS.arm.x, POS.arm.y, POS.arm.z);
     armR.position.set( POS.arm.x, POS.arm.y, POS.arm.z);
     handL.position.set(-POS.hand.x, POS.hand.y, POS.hand.z);
     handR.position.set( POS.hand.x, POS.hand.y, POS.hand.z);
 
-    // --- 物理パラメータ ---
-    let velocityY = 0;
-    const gravity = -0.01;
-    const bounce = 0.3;
-    const bodyRadius = 0.6;
-
-    // --- モデル読み込み ---
+    // モデル読み込み
     const loader = new GLTFLoader();
     async function loadModels() {
         const load = (url) => new Promise(res => loader.load(url, g => res(g.scene)));
-        
-        const mBody = await load('Pig_Body.glb');
-        const mArmL = await load('Pig_Arm.glb');
-        const mArmR = await load('Pig_Arm.glb');
-        const mHandL = await load('Pig_Hand.glb');
-        const mHandR = await load('Pig_Hand.glb');
-
-        if(mBody) bodyGroup.add(mBody);
-        if(mArmL) armL.add(mArmL);
-        if(mArmR) armR.add(mArmR);
-        if(mHandL) handL.add(mHandL);
-        if(mHandR) handR.add(mHandR);
+        const [b, al, ar, hl, hr] = await Promise.all([
+            load('Pig_Body.glb'), load('Pig_Arm.glb'), load('Pig_Arm.glb'), load('Pig_Hand.glb'), load('Pig_Hand.glb')
+        ]);
+        if(b) bodyGroup.add(b); if(al) armL.add(al); if(ar) armR.add(ar); if(hl) handL.add(hl); if(hr) handR.add(hr);
     }
     loadModels();
 
-    camera.position.set(0, 5, 10);
-    camera.lookAt(0, 2, 0);
+    // --- 物理パラメータ ---
+    const physics = {
+        vel: new THREE.Vector3(0, 0, 0),
+        angVel: new THREE.Vector3(0, 0, 0),
+        gravity: -0.012,
+        friction: 0.98,
+        groundFriction: 0.85,
+        torque: 0.006,
+        radius: 0.6
+    };
 
-    // --- ループ処理 ---
+    let input = new THREE.Vector2(0, 0);
+
+    // --- 操作系 ---
+    window.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
+        const dx = (t.clientX - (rect.left + 50)) / 50;
+        const dy = (t.clientY - (rect.top + 50)) / 50;
+        const len = Math.min(Math.sqrt(dx*dx+dy*dy), 1);
+        const ang = Math.atan2(dy, dx);
+        input.set(Math.cos(ang) * len, -Math.sin(ang) * len);
+        document.getElementById('joystick').style.left = `${50 + input.x * 40}px`;
+        document.getElementById('joystick').style.top = `${50 - input.y * 40}px`;
+    });
+    window.addEventListener('touchend', () => {
+        input.set(0, 0);
+        document.getElementById('joystick').style.left = '50%';
+        document.getElementById('joystick').style.top = '50%';
+    });
+
+    // --- メインループ ---
     function animate() {
         requestAnimationFrame(animate);
 
-        // 自由落下
-        velocityY += gravity;
-        player.position.y += velocityY;
+        // 1. 重力
+        physics.vel.y += physics.gravity;
 
-        // 接地判定
-        if (player.position.y - bodyRadius <= 0) {
-            player.position.y = bodyRadius;
-            if (Math.abs(velocityY) > 0.05) {
-                velocityY *= -bounce; 
-            } else {
-                velocityY = 0;
+        // 2. トルク（回転加速度の計算）
+        // スーパーバニーマン同様、スティック方向へ体を回す力を加える
+        physics.angVel.x += input.y * physics.torque; // 前後回転
+        physics.angVel.z -= input.x * physics.torque; // 左右回転
+        
+        // 回転の減衰（空気抵抗）
+        physics.angVel.multiplyScalar(0.96);
+
+        // 3. 回転をメッシュに適用
+        rotPivot.rotation.x += physics.angVel.x;
+        rotPivot.rotation.z += physics.angVel.z;
+
+        // 4. 接地判定と摩擦移動
+        if (player.position.y <= physics.radius) {
+            player.position.y = physics.radius;
+
+            // 地面に触れている時、回転エネルギーを移動速度に変換（摩擦蹴り出し）
+            // 回転が速いほど、地面を蹴る力が強くなる
+            physics.vel.z += physics.angVel.x * physics.radius * 0.6;
+            physics.vel.x -= physics.angVel.z * physics.radius * 0.6;
+
+            // 接地時は垂直速度をリセット（少し跳ねる）
+            if (physics.vel.y < 0) {
+                physics.vel.y *= -0.2; 
             }
+            // 地面摩擦による移動の減衰
+            physics.vel.x *= physics.groundFriction;
+            physics.vel.z *= physics.groundFriction;
         }
+
+        // 5. 位置の更新
+        player.position.add(physics.vel);
+        physics.vel.x *= physics.friction;
+        physics.vel.z *= physics.friction;
+
+        // カメラ追従
+        camera.position.lerp(new THREE.Vector3(player.position.x, player.position.y + 4, player.position.z + 8), 0.1);
+        camera.lookAt(player.position);
 
         renderer.render(scene, camera);
     }
-
     animate();
 
     window.addEventListener('resize', () => {
