@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Game - Joint Rotation Mode</title>
+    <title>Pig Game - Fixed & Rolling</title>
     <style>
         body { margin: 0; overflow: hidden; background: #111; touch-action: none; font-family: sans-serif; }
         #move-stick-wrapper {
@@ -21,7 +21,7 @@
             border-radius: 15px; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
             overflow: hidden; display: flex;
         }
-        .pad-half { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.3; pointer-events: none; }
+        .pad-half { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.3; pointer-events: none; font-size: 24px; }
         #action-stick {
             position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
             background: #ff4400; border-radius: 50%; transform: translate(-50%, -50%);
@@ -41,10 +41,8 @@
 <script type="importmap">
     {
         "imports": {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
     }
 </script>
@@ -66,18 +64,19 @@
     sun.position.set(5, 10, 5);
     scene.add(sun);
 
+    // 地面
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0x333333 }));
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
     scene.add(new THREE.GridHelper(100, 40, 0x444444, 0x444444));
 
+    // プレイヤー構造
     const playerGroup = new THREE.Group();
     scene.add(playerGroup);
 
-    const bodyAnchor = new THREE.Group();
+    const bodyAnchor = new THREE.Group(); // 転がる用
     playerGroup.add(bodyAnchor);
 
-    // 腕の関節（ピボット）を作成
     const armPivotL = new THREE.Group();
     const armPivotR = new THREE.Group();
     playerGroup.add(armPivotL, armPivotR);
@@ -85,35 +84,44 @@
     const loader = new GLTFLoader();
     const models = {};
     const CONFIG = {
-        Shoulder: { x: 0.4, y: 0.7, z: 0 }, // 肩の付け根の位置
-        ArmOffset: { z: -0.2 }, // 関節からメッシュをどれだけ前に出すか
-        HandOffset: { z: -0.5 },
-        RelaxAngle: 0.8, // 未操作時の下向き角度 (ラジアン)
-        AttackAngle: -0.5 // 攻撃時の振り上げ角度
+        Shoulder: { x: 0.4, y: 0.3, z: 0 }, 
+        ArmOffset: { z: 0.4 }, // 前側に配置
+        HandOffset: { z: 0.7 },
+        RelaxAngle: 0.8, // 待機時の下向き
+        AttackAngle: -1.0 // 振り上げ
     };
 
     async function initModels() {
-        const load = (f) => new Promise(r => loader.load(f, g => r(g.scene)));
+        const load = (f) => new Promise(r => loader.load(f, g => r(g.scene), undefined, e => console.error(e)));
+        
         models.Body = await load('Pig_Body.glb');
         models.Arm_L = await load('Pig_Arm.glb');
         models.Arm_R = await load('Pig_Arm.glb');
         models.Hand_L = await load('Pig_Hand.glb');
         models.Hand_R = await load('Pig_Hand.glb');
 
-        bodyAnchor.add(models.Body);
-        
-        // 関節の中にパーツを配置
+        if(models.Body) {
+            models.Body.rotation.y = Math.PI; // 顔を正面に
+            bodyAnchor.add(models.Body);
+        }
+
+        // 左腕セットアップ
         armPivotL.position.set(-CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
-        armPivotL.add(models.Arm_L, models.Hand_L);
-        models.Arm_L.position.set(0, 0, CONFIG.ArmOffset.z);
-        models.Hand_L.position.set(0, 0, CONFIG.HandOffset.z);
+        if(models.Arm_L) {
+            models.Arm_L.position.set(0, 0, CONFIG.ArmOffset.z);
+            models.Hand_L.position.set(0, 0, CONFIG.HandOffset.z);
+            armPivotL.add(models.Arm_L, models.Hand_L);
+        }
 
+        // 右腕セットアップ
         armPivotR.position.set(CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
-        armPivotR.add(models.Arm_R, models.Hand_R);
-        models.Arm_R.position.set(0, 0, CONFIG.ArmOffset.z);
-        models.Hand_R.position.set(0, 0, CONFIG.HandOffset.z);
+        if(models.Arm_R) {
+            models.Arm_R.position.set(0, 0, CONFIG.ArmOffset.z);
+            models.Hand_R.position.set(0, 0, CONFIG.HandOffset.z);
+            armPivotR.add(models.Arm_R, models.Hand_R);
+        }
 
-        playerGroup.position.y = 0.5; 
+        playerGroup.position.y = 0.5; // 接地
     }
     initModels();
 
@@ -122,38 +130,39 @@
 
     const moveWrapper = document.getElementById('move-stick-wrapper');
     const moveStick = document.getElementById('move-stick');
+    const actionStick = document.getElementById('action-stick');
 
+    // 操作系
     window.addEventListener('touchmove', e => {
+        e.preventDefault();
         for(let t of e.changedTouches) {
-            if (t.clientX < window.innerWidth/2) {
+            if (t.clientX < window.innerWidth / 2) {
                 const rect = moveWrapper.getBoundingClientRect();
                 const dx = t.clientX - (rect.left + 50);
                 const dy = t.clientY - (rect.top + 50);
                 const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 40);
-                moveStick.style.left = `${50 + (dx/dist)*dist}px`;
-                moveStick.style.top = `${50 + (dy/dist)*dist}px`;
+                moveStick.style.left = `${50 + (dx/40)*dist}px`;
+                moveStick.style.top = `${50 + (dy/40)*dist}px`;
                 moveInput.set(dx/40, -dy/40);
             } else {
-                const pad = document.getElementById('action-pad');
-                const rect = pad.getBoundingClientRect();
-                const dx = t.clientX - (rect.left + rect.width/2);
-                const dy = t.clientY - (rect.top + rect.height/2);
-                document.getElementById('action-stick').style.left = `${70 + Math.max(-50, Math.min(50, dx))}px`;
-                document.getElementById('action-stick').style.top = `${60 + Math.max(-40, Math.min(40, dy))}px`;
+                const pad = document.getElementById('action-pad').getBoundingClientRect();
+                const dx = t.clientX - (pad.left + pad.width/2);
+                const dy = t.clientY - (pad.top + pad.height/2);
+                actionStick.style.left = `${70 + Math.max(-50, Math.min(50, dx))}px`;
+                actionStick.style.top = `${60 + Math.max(-40, Math.min(40, dy))}px`;
                 actionInput.set(dx/50, -dy/40);
             }
         }
-    });
+    }, { passive: false });
 
     window.addEventListener('touchend', e => {
         for(let t of e.changedTouches) {
-            if (t.clientX < window.innerWidth/2) {
+            if (t.clientX < window.innerWidth / 2) {
                 moveInput.set(0,0);
                 moveStick.style.left = '50%'; moveStick.style.top = '50%';
             } else {
                 actionInput.set(0,0);
-                document.getElementById('action-stick').style.left = '50%';
-                document.getElementById('action-stick').style.top = '50%';
+                actionStick.style.left = '50%'; actionStick.style.top = '50%';
             }
         }
     });
@@ -161,32 +170,26 @@
     function animate() {
         requestAnimationFrame(animate);
 
+        // 移動と転がる回転
         if (moveInput.length() > 0.1) {
-            playerGroup.position.x += moveInput.x * 0.12;
-            playerGroup.position.z -= moveInput.y * 0.12;
+            playerGroup.position.x += moveInput.x * 0.1;
+            playerGroup.position.z -= moveInput.y * 0.1;
             const targetAngle = Math.atan2(moveInput.x, moveInput.y);
             playerGroup.rotation.y = THREE.MathUtils.lerp(playerGroup.rotation.y, targetAngle, 0.15);
-            bodyAnchor.rotation.x -= moveInput.length() * 0.5;
+            bodyAnchor.rotation.x -= moveInput.length() * 0.3;
         }
 
-        // 腕の回転制御
-        if (models.Arm_L) {
-            const upIntensity = Math.max(0, actionInput.y); // 上に倒した分だけ振り上げる
-            
-            // 左腕の計算
-            const leftActive = actionInput.x < 0.3;
-            const targetRotL = leftActive ? 
-                THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
-            armPivotL.rotation.x = THREE.MathUtils.lerp(armPivotL.rotation.x, targetRotL, 0.2);
+        // 腕の回転（接続部中心）
+        const upIntensity = Math.max(0, actionInput.y);
+        const targetRotL = (actionInput.x < 0.3) ? 
+            THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
+        const targetRotR = (actionInput.x > -0.3) ? 
+            THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
 
-            // 右腕の計算
-            const rightActive = actionInput.x > -0.3;
-            const targetRotR = rightActive ? 
-                THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
-            armPivotR.rotation.x = THREE.MathUtils.lerp(armPivotR.rotation.x, targetRotR, 0.2);
-        }
+        armPivotL.rotation.x = THREE.MathUtils.lerp(armPivotL.rotation.x, targetRotL, 0.2);
+        armPivotR.rotation.x = THREE.MathUtils.lerp(armPivotR.rotation.x, targetRotR, 0.2);
 
-        camera.position.lerp(playerGroup.position.clone().add(new THREE.Vector3(0, 7, 8)), 0.1);
+        camera.position.lerp(playerGroup.position.clone().add(new THREE.Vector3(0, 6, 8)), 0.1);
         camera.lookAt(playerGroup.position);
         renderer.render(scene, camera);
     }
