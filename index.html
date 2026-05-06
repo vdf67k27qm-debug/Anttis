@@ -3,54 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Game - Independent Parts Tuning</title>
+    <title>Pig Game - Combat Mode</title>
     <style>
         body { margin: 0; overflow: hidden; background: #111; touch-action: none; font-family: sans-serif; }
-        #ui-layer {
-            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 350px; background: rgba(0,0,0,0.85);
-            color: white; padding: 15px; border-radius: 15px; z-index: 1000;
-        }
-        .control-row { margin-bottom: 10px; }
-        .label-row { display: flex; justify-content: space-between; font-size: 11px; color: #00ff88; }
-        select { width: 100%; padding: 8px; border-radius: 5px; background: #333; color: white; border: 1px solid #555; font-size: 14px; margin-bottom: 10px; }
-        input[type="range"] { width: 100%; height: 25px; margin-bottom: 5px; }
-        #joystick-wrapper {
-            position: absolute; bottom: 50px; left: 50px;
+        /* 移動用ジョイスティック（左） */
+        #move-stick-wrapper {
+            position: absolute; bottom: 40px; left: 40px;
             width: 100px; height: 100px; background: rgba(255,255,255,0.1);
-            border-radius: 50%; display: none; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 50%; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
         }
-        #joystick-stick {
-            position: absolute; top: 50%; left: 50%;
-            width: 40px; height: 40px; background: #00ff88;
-            border-radius: 50%; transform: translate(-50%, -50%);
+        #move-stick {
+            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
+            background: #00ff88; border-radius: 50%; transform: translate(-50%, -50%);
+        }
+        /* 攻撃用ジョイスティック（右・分割） */
+        #action-pad {
+            position: absolute; bottom: 40px; right: 40px;
+            width: 140px; height: 120px; background: rgba(255,255,255,0.1);
+            border-radius: 15px; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
+            overflow: hidden; display: flex;
+        }
+        .pad-half {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            border: 1px solid rgba(255,255,255,0.1); pointer-events: none;
+        }
+        #action-stick {
+            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
+            background: #ff4400; border-radius: 50%; transform: translate(-50%, -50%);
+            opacity: 0.8;
+        }
+        #ui-info {
+            position: absolute; top: 10px; left: 10px; color: white; 
+            background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 10px;
         }
     </style>
 </head>
 <body>
 
-<div id="ui-layer">
-    <div class="control-row">
-        <label style="font-size: 12px;">調整対象を選択</label>
-        <select id="partSelect">
-            <option value="Arm">腕 (Arm L/R)</option>
-            <option value="Hand">手 (Hand L/R)</option>
-            <option value="Body">体 (Body)</option>
-        </select>
-    </div>
-    <div class="control-row">
-        <div class="label-row"><span>左右 (X)</span><span id="valX">0.35</span></div>
-        <input type="range" id="posX" min="-2.0" max="2.0" step="0.01" value="0.35">
-        
-        <div class="label-row"><span>上下 (Y)</span><span id="valY">0.75</span></div>
-        <input type="range" id="posY" min="0" max="2.5" step="0.01" value="0.75">
-        
-        <div class="label-row"><span>奥行 (Z)</span><span id="valZ">0.78</span></div>
-        <input type="range" id="posZ" min="-2.0" max="2.0" step="0.01" value="0.78">
-    </div>
+<div id="ui-info">記録座標: Arm(Z:0.49) Hand(Z:0.8)<br>右パッド: 左倒し(左腕) / 右倒し(右腕) / 中央(両腕)</div>
+<div id="move-stick-wrapper"><div id="move-stick"></div></div>
+<div id="action-pad">
+    <div class="pad-half">✋</div>
+    <div class="pad-half">✋</div>
+    <div id="action-stick"></div>
 </div>
-
-<div id="joystick-wrapper"><div id="joystick-stick"></div></div>
 
 <script type="importmap">
     {
@@ -65,8 +61,9 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+    // シーン設定
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x334455);
+    scene.background = new THREE.Color(0x222233);
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -74,25 +71,30 @@
     document.body.appendChild(renderer.domElement);
 
     scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
     sun.position.set(5, 10, 5);
     scene.add(sun);
-    scene.add(new THREE.GridHelper(100, 50));
+
+    // 地面（当たり判定用）
+    const floorGeo = new THREE.PlaneGeometry(100, 100);
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+    scene.add(new THREE.GridHelper(100, 40, 0x444444, 0x444444));
 
     const playerGroup = new THREE.Group();
     scene.add(playerGroup);
 
     const loader = new GLTFLoader();
-    const models = { Body: null, Arm_L: null, Arm_R: null, Hand_L: null, Hand_R: null };
-
-    // パーツごとの個別座標データ
-    const config = {
-        Arm: { x: 0.35, y: 0.75, z: 0.78 },
-        Hand: { x: 0.35, y: 0.75, z: 0.78 },
-        Body: { x: 0, y: 0, z: 0 }
+    const models = {};
+    // 記録された最新の座標
+    const CONFIG = {
+        Arm: { x: 0.35, y: 0.75, z: 0.49 },
+        Hand: { x: 0.35, y: 0.75, z: 0.8 }
     };
 
-    async function setupPlayer() {
+    async function initModels() {
         const load = (f) => new Promise(r => loader.load(f, g => r(g.scene)));
         models.Body = await load('Pig_Body.glb');
         models.Arm_L = await load('Pig_Arm.glb');
@@ -100,104 +102,121 @@
         models.Hand_L = await load('Pig_Hand.glb');
         models.Hand_R = await load('Pig_Hand.glb');
 
+        // 正面を向かせる（180度回転が必要な場合）
+        models.Body.rotation.y = Math.PI; 
+        
         Object.values(models).forEach(m => playerGroup.add(m));
-        applyPositions();
+        resetPartPositions();
     }
-    setupPlayer();
+    initModels();
 
-    const partSelect = document.getElementById('partSelect');
-    const sliders = { X: document.getElementById('posX'), Y: document.getElementById('posY'), Z: document.getElementById('posZ') };
-    const valLabels = { X: document.getElementById('valX'), Y: document.getElementById('valY'), Z: document.getElementById('valZ') };
-
-    // 現在の選択パーツの座標をモデルに反映
-    function applyPositions() {
+    function resetPartPositions() {
         if (!models.Body) return;
-        
-        // 腕の反映
-        models.Arm_L.position.set(-config.Arm.x, config.Arm.y, config.Arm.z);
-        models.Arm_R.position.set(config.Arm.x, config.Arm.y, config.Arm.z);
-        
-        // 手の反映
-        models.Hand_L.position.set(-config.Hand.x, config.Hand.y, config.Hand.z);
-        models.Hand_R.position.set(config.Hand.x, config.Hand.y, config.Hand.z);
-        
-        // 体の反映
-        models.Body.position.set(config.Body.x, config.Body.y, config.Body.z);
+        models.Arm_L.position.set(-CONFIG.Arm.x, CONFIG.Arm.y, CONFIG.Arm.z);
+        models.Arm_R.position.set(CONFIG.Arm.x, CONFIG.Arm.y, CONFIG.Arm.z);
+        models.Hand_L.position.set(-CONFIG.Hand.x, CONFIG.Hand.y, CONFIG.Hand.z);
+        models.Hand_R.position.set(CONFIG.Hand.x, CONFIG.Hand.y, CONFIG.Hand.z);
     }
 
-    // スライダーを動かした時
-    function onSliderInput() {
-        const p = partSelect.value;
-        config[p].x = parseFloat(sliders.X.value);
-        config[p].y = parseFloat(sliders.Y.value);
-        config[p].z = parseFloat(sliders.Z.value);
-        
-        valLabels.X.innerText = config[p].x;
-        valLabels.Y.innerText = config[p].y;
-        valLabels.Z.innerText = config[p].z;
-        
-        applyPositions();
-    }
+    // 入力管理
+    let moveInput = new THREE.Vector2();
+    let actionInput = new THREE.Vector2();
+    let isMoving = false, isAction = false;
 
-    // パーツを切り替えた時、スライダーの位置をそのパーツの保存値に戻す
-    partSelect.addEventListener('change', () => {
-        const p = partSelect.value;
-        sliders.X.value = config[p].x;
-        sliders.Y.value = config[p].y;
-        sliders.Z.value = config[p].z;
-        
-        valLabels.X.innerText = config[p].x;
-        valLabels.Y.innerText = config[p].y;
-        valLabels.Z.innerText = config[p].z;
-    });
-
-    Object.values(sliders).forEach(s => s.addEventListener('input', onSliderInput));
-
-    // ジョイスティック (進行方向修正済み)
-    const wrapper = document.getElementById('joystick-wrapper');
-    const stick = document.getElementById('joystick-stick');
-    let moveDir = new THREE.Vector2(0, 0);
-    let isMoving = false;
+    // 左ジョイスティック (移動)
+    const moveWrapper = document.getElementById('move-stick-wrapper');
+    const moveStick = document.getElementById('move-stick');
 
     window.addEventListener('touchstart', e => {
-        const t = e.touches[0];
-        if (t.clientX < window.innerWidth / 2 && t.clientY > 250) {
-            isMoving = true;
-            wrapper.style.display = 'block';
-            wrapper.style.left = `${t.clientX - 50}px`;
-            wrapper.style.top = `${t.clientY - 50}px`;
+        for(let t of e.changedTouches) {
+            if (t.clientX < window.innerWidth/2) {
+                isMoving = true;
+                moveWrapper.style.left = `${t.clientX - 50}px`;
+                moveWrapper.style.top = `${t.clientY - 50}px`;
+            } else {
+                isAction = true;
+            }
         }
     });
 
     window.addEventListener('touchmove', e => {
-        if (!isMoving) return;
-        const t = e.touches[0];
-        const rect = wrapper.getBoundingClientRect();
-        const dx = t.clientX - (rect.left + 50);
-        const dy = t.clientY - (rect.top + 50);
-        const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
-        const angle = Math.atan2(dy, dx);
-        
-        stick.style.left = `${50 + Math.cos(angle) * dist}px`;
-        stick.style.top = `${50 + Math.sin(angle) * dist}px`;
-        moveDir.set(dx / 40, -(dy / 40));
+        for(let t of e.changedTouches) {
+            if (t.clientX < window.innerWidth/2) {
+                const rect = moveWrapper.getBoundingClientRect();
+                const dx = t.clientX - (rect.left + 50);
+                const dy = t.clientY - (rect.top + 50);
+                const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 40);
+                const angle = Math.atan2(dy, dx);
+                moveStick.style.left = `${50 + Math.cos(angle)*dist}px`;
+                moveStick.style.top = `${50 + Math.sin(angle)*dist}px`;
+                moveInput.set(dx/40, -dy/40);
+            } else {
+                const pad = document.getElementById('action-pad');
+                const rect = pad.getBoundingClientRect();
+                const dx = t.clientX - (rect.left + rect.width/2);
+                const dy = t.clientY - (rect.top + rect.height/2);
+                const stick = document.getElementById('action-stick');
+                stick.style.left = `${70 + Math.max(-50, Math.min(50, dx))}px`;
+                stick.style.top = `${60 + Math.max(-40, Math.min(40, dy))}px`;
+                actionInput.set(dx/50, -dy/40);
+            }
+        }
     });
 
-    window.addEventListener('touchend', () => {
-        isMoving = false;
-        wrapper.style.display = 'none';
-        moveDir.set(0, 0);
+    window.addEventListener('touchend', e => {
+        for(let t of e.changedTouches) {
+            if (t.clientX < window.innerWidth/2) {
+                isMoving = false;
+                moveInput.set(0,0);
+                moveStick.style.left = '50%'; moveStick.style.top = '50%';
+            } else {
+                isAction = false;
+                actionInput.set(0,0);
+                document.getElementById('action-stick').style.left = '50%';
+                document.getElementById('action-stick').style.top = '50%';
+            }
+        }
     });
 
     function animate() {
         requestAnimationFrame(animate);
-        if (moveDir.length() > 0.1) {
-            playerGroup.position.x += moveDir.x * 0.08;
-            playerGroup.position.z -= moveDir.y * 0.08;
-            const angle = Math.atan2(moveDir.x, moveDir.y);
-            playerGroup.quaternion.slerp(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0)), 0.2);
+
+        // 移動ロジック（正面向き）
+        if (moveInput.length() > 0.1) {
+            playerGroup.position.x += moveInput.x * 0.1;
+            playerGroup.position.z -= moveInput.y * 0.1;
+            const targetAngle = Math.atan2(moveInput.x, moveInput.y);
+            playerGroup.rotation.y = THREE.MathUtils.lerp(playerGroup.rotation.y, targetAngle, 0.15);
         }
-        camera.position.lerp(playerGroup.position.clone().add(new THREE.Vector3(0, 7, 7)), 0.1);
+
+        // 腕のアクションロジック
+        if (models.Arm_L && models.Arm_R) {
+            const intensity = Math.abs(actionInput.y) * 0.5;
+            const threshold = 0.3; // 中央判定の広さ
+            
+            // 左腕
+            if (actionInput.x < threshold) {
+                models.Arm_L.position.z = CONFIG.Arm.z + intensity;
+                models.Hand_L.position.z = CONFIG.Hand.z + intensity;
+            } else {
+                models.Arm_L.position.z = CONFIG.Arm.z;
+                models.Hand_L.position.z = CONFIG.Hand.z;
+            }
+
+            // 右腕
+            if (actionInput.x > -threshold) {
+                models.Arm_R.position.z = CONFIG.Arm.z + intensity;
+                models.Hand_R.position.z = CONFIG.Hand.z + intensity;
+            } else {
+                models.Arm_R.position.z = CONFIG.Arm.z;
+                models.Hand_R.position.z = CONFIG.Hand.z;
+            }
+            
+            // 当たり判定：地面にめり込まないようにY座標を制限
+            playerGroup.position.y = Math.max(0, playerGroup.position.y);
+        }
+
+        camera.position.lerp(playerGroup.position.clone().add(new THREE.Vector3(0, 8, 8)), 0.1);
         camera.lookAt(playerGroup.position);
         renderer.render(scene, camera);
     }
