@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Game - Physics Rolling Edition</title>
+    <title>Pig Game - Torque Rolling Edition</title>
     <style>
         body { margin: 0; overflow: hidden; background: #111; touch-action: none; font-family: sans-serif; }
         #move-stick-wrapper {
@@ -51,7 +51,6 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    // --- 初期設定 ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222233);
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -70,24 +69,26 @@
     scene.add(floor);
     scene.add(new THREE.GridHelper(100, 40, 0x444444, 0x444444));
 
-    // --- 物理・構成設定 ---
+    // --- 物理パラメータ ---
     const CONFIG = {
-        Shoulder: { x: 0.45, y: 0.25, z: 0.4 },
-        ArmOffset: { z: 0.2 },
-        HandOffset: { z: 0.5 },
-        BodyRadius: 0.6,    // 物理的な半径
-        Friction: 0.94,     // 摩擦（慣性の維持率）
-        Accel: 0.018,       // 加速度
-        RelaxAngle: 0.5,    // 腕の基本角度（下向き）
-        AttackAngle: -1.4   // 腕の振り上げ角度
+        Shoulder: { x: 0.45, y: 0.25, z: -0.4 }, // Zをマイナスにして前面(顔側)へ
+        ArmOffset: { z: -0.2 },
+        HandOffset: { z: -0.5 },
+        BodyRadius: 0.6,
+        Friction: 0.96,       // 移動摩擦
+        AngularFriction: 0.92, // 回転摩擦
+        TorquePower: 0.015,   // 頭を押す力の強さ
+        RelaxAngle: 0.6,
+        AttackAngle: -1.2
     };
 
-    let velocity = new THREE.Vector3(0, 0, 0); // 物理速度ベクトル
     let moveInput = new THREE.Vector2();
     let actionInput = new THREE.Vector2();
+    let velocity = new THREE.Vector3(0, 0, 0);
+    let angularVelocity = 0; // 回転速度
 
     const playerRoot = new THREE.Group();
-    const rollPivot = new THREE.Group(); // 全身が転がるための軸
+    const rollPivot = new THREE.Group(); 
     const armPivotL = new THREE.Group();
     const armPivotR = new THREE.Group();
 
@@ -95,7 +96,6 @@
     playerRoot.add(rollPivot);
     rollPivot.add(armPivotL, armPivotR);
 
-    // --- モデルロード ---
     const loader = new GLTFLoader();
     const models = {};
 
@@ -108,10 +108,11 @@
         models.Hand_R = await load('Pig_Hand.glb');
 
         if(models.Body) {
-            models.Body.rotation.y = Math.PI; // 正面を向かせる
+            // モデル自体の向きを初期化（顔が前を向くように）
             rollPivot.add(models.Body);
         }
 
+        // 左腕（前面へ配置）
         armPivotL.position.set(-CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
         if(models.Arm_L) {
             models.Arm_L.position.set(0, 0, CONFIG.ArmOffset.z);
@@ -119,6 +120,7 @@
             armPivotL.add(models.Arm_L, models.Hand_L);
         }
 
+        // 右腕
         armPivotR.position.set(CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
         if(models.Arm_R) {
             models.Arm_R.position.set(0, 0, CONFIG.ArmOffset.z);
@@ -128,25 +130,26 @@
     }
     initModels();
 
-    // --- 操作系 ---
+    // --- 入力処理 ---
     window.addEventListener('touchmove', e => {
         e.preventDefault();
         for(let t of e.changedTouches) {
             if (t.clientX < window.innerWidth / 2) {
                 const rect = document.getElementById('move-stick-wrapper').getBoundingClientRect();
-                const dx = t.clientX - (rect.left + 50);
-                const dy = t.clientY - (rect.top + 50);
-                const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 40);
-                document.getElementById('move-stick').style.left = `${50 + (dx/40)*dist}px`;
-                document.getElementById('move-stick').style.top = `${50 + (dy/40)*dist}px`;
-                moveInput.set(dx/40, -dy/40);
+                const dx = (t.clientX - (rect.left + 50)) / 40;
+                const dy = (t.clientY - (rect.top + 50)) / 40;
+                const len = Math.min(Math.sqrt(dx*dx + dy*dy), 1.0);
+                const ang = Math.atan2(dy, dx);
+                document.getElementById('move-stick').style.left = `${50 + Math.cos(ang) * len * 40}px`;
+                document.getElementById('move-stick').style.top = `${50 + Math.sin(ang) * len * 40}px`;
+                moveInput.set(dx, -dy);
             } else {
                 const pad = document.getElementById('action-pad').getBoundingClientRect();
-                const dx = t.clientX - (pad.left + pad.width/2);
-                const dy = t.clientY - (pad.top + pad.height/2);
-                document.getElementById('action-stick').style.left = `${70 + Math.max(-50, Math.min(50, dx))}px`;
-                document.getElementById('action-stick').style.top = `${60 + Math.max(-40, Math.min(40, dy))}px`;
-                actionInput.set(dx/50, -dy/40);
+                const dx = (t.clientX - (pad.left + pad.width/2)) / 50;
+                const dy = (t.clientY - (pad.top + pad.height/2)) / 40;
+                document.getElementById('action-stick').style.left = `${70 + Math.max(-50, Math.min(50, dx*50))}px`;
+                document.getElementById('action-stick').style.top = `${60 + Math.max(-40, Math.min(40, dy*40))}px`;
+                actionInput.set(dx, -dy);
             }
         }
     }, { passive: false });
@@ -165,42 +168,42 @@
         }
     });
 
-    // --- メインループ（物理計算） ---
     function animate() {
         requestAnimationFrame(animate);
 
-        // 1. 速度の計算（慣性と加速）
-        if (moveInput.length() > 0.1) {
-            velocity.x += moveInput.x * CONFIG.Accel;
-            velocity.z -= moveInput.y * CONFIG.Accel;
+        // 1. トルク計算（頭に力を加えて回転させる）
+        const inputLen = moveInput.length();
+        if (inputLen > 0.1) {
+            // スティックの入力＝頭を押す力。これにより回転速度が増す
+            angularVelocity -= inputLen * CONFIG.TorquePower;
 
-            // 進行方向への向き補正（LERPで滑らかに）
+            // 進行方向に向きを変える
             const targetAngle = Math.atan2(moveInput.x, moveInput.y);
             let diff = targetAngle - playerRoot.rotation.y;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             playerRoot.rotation.y += diff * 0.1;
         }
+
+        // 2. 回転を移動に変換
+        angularVelocity *= CONFIG.AngularFriction;
+        rollPivot.rotation.x += angularVelocity;
+
+        // 物理的な接地面の蹴り出し: 回転速度に応じて移動速度（velocity）が発生する
+        const drive = -angularVelocity * CONFIG.BodyRadius; 
+        velocity.x = Math.sin(playerRoot.rotation.y) * drive;
+        velocity.z = Math.cos(playerRoot.rotation.y) * drive;
         
-        // 摩擦による減衰
         velocity.multiplyScalar(CONFIG.Friction);
         playerRoot.position.add(velocity);
 
-        // 2. 物理的な転がり計算（滑りなき条件：θ = L / R）
-        const speed = new THREE.Vector2(velocity.x, velocity.z).length();
-        if (speed > 0.001) {
-            // 移動距離に応じて正確な角度分だけ回転させる
-            rollPivot.rotation.x -= speed / CONFIG.BodyRadius;
-        }
+        // 3. 絶対接地判定（地面にめり込まない）
+        const ellipseHeight = Math.abs(Math.cos(rollPivot.rotation.x)) * 0.15;
+        // 地面からの高さは「半径 + 形状補正」で、常に 0 以上を保証
+        const minHeight = CONFIG.BodyRadius + ellipseHeight;
+        playerRoot.position.y = Math.max(minHeight, playerRoot.position.y * 0.8 + minHeight * 0.2);
 
-        // 3. 当たり判定とバウンド補正（物理的に接地を維持）
-        // 転がりの角度（rollPivot.x）に応じて、体の断面半径が変わるのをシミュレート
-        const ellipseFactor = Math.abs(Math.cos(rollPivot.rotation.x)) * 0.15;
-        const bounce = speed * 0.8 * Math.abs(Math.sin(rollPivot.rotation.x * 2.0)); // 速度に応じた弾み
-        const targetY = CONFIG.BodyRadius + ellipseFactor + bounce;
-        playerRoot.position.y = THREE.MathUtils.lerp(playerRoot.position.y, targetY, 0.2);
-
-        // 4. 腕の接続・回転制御（重力に従う下向きをデフォルトに）
+        // 4. 腕の制御
         const upIntensity = Math.max(0, actionInput.y);
         const targetRotL = (actionInput.x < 0.3) ? 
             THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
@@ -211,8 +214,7 @@
         armPivotR.rotation.x = THREE.MathUtils.lerp(armPivotR.rotation.x, targetRotR, 0.2);
 
         // 5. カメラ追従
-        const camTarget = playerRoot.position.clone().add(new THREE.Vector3(0, 6, 9));
-        camera.position.lerp(camTarget, 0.08);
+        camera.position.lerp(playerRoot.position.clone().add(new THREE.Vector3(0, 6, 9)), 0.1);
         camera.lookAt(playerRoot.position);
 
         renderer.render(scene, camera);
