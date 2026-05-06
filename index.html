@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Physics - Ground Zero</title>
+    <title>Pig Physics - Adjusted Limbs</title>
     <style>
         body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
         #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<div id="info">物理演算テスト: 重力で落下し、地面で止まります。</div>
+<div id="info">物理テスト：指定された数値で腕と手を配置しました。</div>
 
 <script type="importmap">
     {
@@ -48,47 +48,57 @@
     scene.add(floor);
     scene.add(new THREE.GridHelper(20, 20));
 
-    // --- キャラクター構造 (PlayerRoot) ---
+    // --- キャラクター構造 ---
     const player = new THREE.Group();
-    player.position.y = 10; // 空中に配置
+    player.position.y = 10; 
     scene.add(player);
 
-    // モデルパーツ用のコンテナ（ここに読み込んだGLBを入れる）
-    const bodyContainer = new THREE.Group();
-    const armLContainer = new THREE.Group();
-    const armRContainer = new THREE.Group();
-    player.add(bodyContainer, armLContainer, armRContainer);
+    // パーツ用グループ
+    const bodyGroup = new THREE.Group();
+    const armL = new THREE.Group();
+    const armR = new THREE.Group();
+    const handL = new THREE.Group();
+    const handR = new THREE.Group();
+    
+    player.add(bodyGroup, armL, armR, handL, handR);
+
+    // --- 調整数値の適用 ---
+    const POS = {
+        arm:  { x: 0.35, y: 0.75, z: 0.49 },
+        hand: { x: 0.35, y: 0.75, z: 0.8 }
+    };
+
+    // 左右対称に配置
+    armL.position.set(-POS.arm.x, POS.arm.y, POS.arm.z);
+    armR.position.set( POS.arm.x, POS.arm.y, POS.arm.z);
+    handL.position.set(-POS.hand.x, POS.hand.y, POS.hand.z);
+    handR.position.set( POS.hand.x, POS.hand.y, POS.hand.z);
 
     // --- 物理パラメータ ---
-    let velocityY = 0;      // 垂直方向の速度
-    const gravity = -0.01;  // 重力加速度
-    const bounce = 0.3;     // 跳ね返り係数（0なら跳ねない）
-    const bodyRadius = 0.6; // キャラクターの半径（当たり判定）
+    let velocityY = 0;
+    const gravity = -0.01;
+    const bounce = 0.3;
+    const bodyRadius = 0.6;
 
     // --- モデル読み込み ---
     const loader = new GLTFLoader();
     async function loadModels() {
         const load = (url) => new Promise(res => loader.load(url, g => res(g.scene)));
         
-        const body = await load('Pig_Body.glb');
-        const armL = await load('Pig_Arm.glb');
-        const armR = await load('Pig_Arm.glb');
+        const mBody = await load('Pig_Body.glb');
+        const mArmL = await load('Pig_Arm.glb');
+        const mArmR = await load('Pig_Arm.glb');
+        const mHandL = await load('Pig_Hand.glb');
+        const mHandR = await load('Pig_Hand.glb');
 
-        if(body) bodyContainer.add(body);
-        
-        // 腕の位置を一旦「体の横」にリセット
-        if(armL) {
-            armL.position.set(-0.6, 0, 0); 
-            armLContainer.add(armL);
-        }
-        if(armR) {
-            armR.position.set(0.6, 0, 0);
-            armRContainer.add(armR);
-        }
+        if(mBody) bodyGroup.add(mBody);
+        if(mArmL) armL.add(mArmL);
+        if(mArmR) armR.add(mArmR);
+        if(mHandL) handL.add(mHandL);
+        if(mHandR) handR.add(mHandR);
     }
     loadModels();
 
-    // カメラ位置
     camera.position.set(0, 5, 10);
     camera.lookAt(0, 2, 0);
 
@@ -96,16 +106,13 @@
     function animate() {
         requestAnimationFrame(animate);
 
-        // 1. 重力を適用
+        // 自由落下
         velocityY += gravity;
         player.position.y += velocityY;
 
-        // 2. 接地判定（当たり判定）
-        // 地面の高さは 0。足元（中心からbodyRadius分下）が 0 以下になったら衝突
+        // 接地判定
         if (player.position.y - bodyRadius <= 0) {
-            player.position.y = bodyRadius; // 位置を地面の上に固定
-            
-            // 速度を反転させて少し跳ねさせる（または 0 にして止める）
+            player.position.y = bodyRadius;
             if (Math.abs(velocityY) > 0.05) {
                 velocityY *= -bounce; 
             } else {
@@ -118,7 +125,6 @@
 
     animate();
 
-    // リサイズ対応
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
