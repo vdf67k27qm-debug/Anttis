@@ -3,40 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Game - Torque Rolling Edition</title>
+    <title>Pig Physics - Ground Zero</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; touch-action: none; font-family: sans-serif; }
-        #move-stick-wrapper {
-            position: absolute; bottom: 40px; left: 40px;
-            width: 100px; height: 100px; background: rgba(255,255,255,0.1);
-            border-radius: 50%; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
-        }
-        #move-stick {
-            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
-            background: #00ff88; border-radius: 50%; transform: translate(-50%, -50%);
-        }
-        #action-pad {
-            position: absolute; bottom: 40px; right: 40px;
-            width: 140px; height: 120px; background: rgba(255,255,255,0.1);
-            border-radius: 15px; z-index: 100; border: 2px solid rgba(255,255,255,0.2);
-            overflow: hidden; display: flex;
-        }
-        .pad-half { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.3; pointer-events: none; font-size: 24px; }
-        #action-stick {
-            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
-            background: #ff4400; border-radius: 50%; transform: translate(-50%, -50%);
-            opacity: 0.8;
-        }
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
+        #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
     </style>
 </head>
 <body>
 
-<div id="move-stick-wrapper"><div id="move-stick"></div></div>
-<div id="action-pad">
-    <div class="pad-half">✋</div>
-    <div class="pad-half">✋</div>
-    <div id="action-stick"></div>
-</div>
+<div id="info">物理演算テスト: 重力で落下し、地面で止まります。</div>
 
 <script type="importmap">
     {
@@ -51,177 +26,99 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+    // --- シーン基本設定 ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222233);
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     const sun = new THREE.DirectionalLight(0xffffff, 1.0);
     sun.position.set(5, 10, 5);
     scene.add(sun);
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0x333333 }));
+    // --- 地面 ---
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20), 
+        new THREE.MeshPhongMaterial({ color: 0x444444 })
+    );
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
-    scene.add(new THREE.GridHelper(100, 40, 0x444444, 0x444444));
+    scene.add(new THREE.GridHelper(20, 20));
+
+    // --- キャラクター構造 (PlayerRoot) ---
+    const player = new THREE.Group();
+    player.position.y = 10; // 空中に配置
+    scene.add(player);
+
+    // モデルパーツ用のコンテナ（ここに読み込んだGLBを入れる）
+    const bodyContainer = new THREE.Group();
+    const armLContainer = new THREE.Group();
+    const armRContainer = new THREE.Group();
+    player.add(bodyContainer, armLContainer, armRContainer);
 
     // --- 物理パラメータ ---
-    const CONFIG = {
-        Shoulder: { x: 0.45, y: 0.25, z: -0.4 }, // Zをマイナスにして前面(顔側)へ
-        ArmOffset: { z: -0.2 },
-        HandOffset: { z: -0.5 },
-        BodyRadius: 0.6,
-        Friction: 0.96,       // 移動摩擦
-        AngularFriction: 0.92, // 回転摩擦
-        TorquePower: 0.015,   // 頭を押す力の強さ
-        RelaxAngle: 0.6,
-        AttackAngle: -1.2
-    };
+    let velocityY = 0;      // 垂直方向の速度
+    const gravity = -0.01;  // 重力加速度
+    const bounce = 0.3;     // 跳ね返り係数（0なら跳ねない）
+    const bodyRadius = 0.6; // キャラクターの半径（当たり判定）
 
-    let moveInput = new THREE.Vector2();
-    let actionInput = new THREE.Vector2();
-    let velocity = new THREE.Vector3(0, 0, 0);
-    let angularVelocity = 0; // 回転速度
-
-    const playerRoot = new THREE.Group();
-    const rollPivot = new THREE.Group(); 
-    const armPivotL = new THREE.Group();
-    const armPivotR = new THREE.Group();
-
-    scene.add(playerRoot);
-    playerRoot.add(rollPivot);
-    rollPivot.add(armPivotL, armPivotR);
-
+    // --- モデル読み込み ---
     const loader = new GLTFLoader();
-    const models = {};
+    async function loadModels() {
+        const load = (url) => new Promise(res => loader.load(url, g => res(g.scene)));
+        
+        const body = await load('Pig_Body.glb');
+        const armL = await load('Pig_Arm.glb');
+        const armR = await load('Pig_Arm.glb');
 
-    async function initModels() {
-        const load = (f) => new Promise(r => loader.load(f, g => r(g.scene)));
-        models.Body = await load('Pig_Body.glb');
-        models.Arm_L = await load('Pig_Arm.glb');
-        models.Arm_R = await load('Pig_Arm.glb');
-        models.Hand_L = await load('Pig_Hand.glb');
-        models.Hand_R = await load('Pig_Hand.glb');
-
-        if(models.Body) {
-            // モデル自体の向きを初期化（顔が前を向くように）
-            rollPivot.add(models.Body);
+        if(body) bodyContainer.add(body);
+        
+        // 腕の位置を一旦「体の横」にリセット
+        if(armL) {
+            armL.position.set(-0.6, 0, 0); 
+            armLContainer.add(armL);
         }
-
-        // 左腕（前面へ配置）
-        armPivotL.position.set(-CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
-        if(models.Arm_L) {
-            models.Arm_L.position.set(0, 0, CONFIG.ArmOffset.z);
-            models.Hand_L.position.set(0, 0, CONFIG.HandOffset.z);
-            armPivotL.add(models.Arm_L, models.Hand_L);
-        }
-
-        // 右腕
-        armPivotR.position.set(CONFIG.Shoulder.x, CONFIG.Shoulder.y, CONFIG.Shoulder.z);
-        if(models.Arm_R) {
-            models.Arm_R.position.set(0, 0, CONFIG.ArmOffset.z);
-            models.Hand_R.position.set(0, 0, CONFIG.HandOffset.z);
-            armPivotR.add(models.Arm_R, models.Hand_R);
+        if(armR) {
+            armR.position.set(0.6, 0, 0);
+            armRContainer.add(armR);
         }
     }
-    initModels();
+    loadModels();
 
-    // --- 入力処理 ---
-    window.addEventListener('touchmove', e => {
-        e.preventDefault();
-        for(let t of e.changedTouches) {
-            if (t.clientX < window.innerWidth / 2) {
-                const rect = document.getElementById('move-stick-wrapper').getBoundingClientRect();
-                const dx = (t.clientX - (rect.left + 50)) / 40;
-                const dy = (t.clientY - (rect.top + 50)) / 40;
-                const len = Math.min(Math.sqrt(dx*dx + dy*dy), 1.0);
-                const ang = Math.atan2(dy, dx);
-                document.getElementById('move-stick').style.left = `${50 + Math.cos(ang) * len * 40}px`;
-                document.getElementById('move-stick').style.top = `${50 + Math.sin(ang) * len * 40}px`;
-                moveInput.set(dx, -dy);
-            } else {
-                const pad = document.getElementById('action-pad').getBoundingClientRect();
-                const dx = (t.clientX - (pad.left + pad.width/2)) / 50;
-                const dy = (t.clientY - (pad.top + pad.height/2)) / 40;
-                document.getElementById('action-stick').style.left = `${70 + Math.max(-50, Math.min(50, dx*50))}px`;
-                document.getElementById('action-stick').style.top = `${60 + Math.max(-40, Math.min(40, dy*40))}px`;
-                actionInput.set(dx, -dy);
-            }
-        }
-    }, { passive: false });
+    // カメラ位置
+    camera.position.set(0, 5, 10);
+    camera.lookAt(0, 2, 0);
 
-    window.addEventListener('touchend', e => {
-        for(let t of e.changedTouches) {
-            if (t.clientX < window.innerWidth / 2) {
-                moveInput.set(0,0);
-                document.getElementById('move-stick').style.left = '50%';
-                document.getElementById('move-stick').style.top = '50%';
-            } else {
-                actionInput.set(0,0);
-                document.getElementById('action-stick').style.left = '50%';
-                document.getElementById('action-stick').style.top = '50%';
-            }
-        }
-    });
-
+    // --- ループ処理 ---
     function animate() {
         requestAnimationFrame(animate);
 
-        // 1. トルク計算（頭に力を加えて回転させる）
-        const inputLen = moveInput.length();
-        if (inputLen > 0.1) {
-            // スティックの入力＝頭を押す力。これにより回転速度が増す
-            angularVelocity -= inputLen * CONFIG.TorquePower;
+        // 1. 重力を適用
+        velocityY += gravity;
+        player.position.y += velocityY;
 
-            // 進行方向に向きを変える
-            const targetAngle = Math.atan2(moveInput.x, moveInput.y);
-            let diff = targetAngle - playerRoot.rotation.y;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            playerRoot.rotation.y += diff * 0.1;
+        // 2. 接地判定（当たり判定）
+        // 地面の高さは 0。足元（中心からbodyRadius分下）が 0 以下になったら衝突
+        if (player.position.y - bodyRadius <= 0) {
+            player.position.y = bodyRadius; // 位置を地面の上に固定
+            
+            // 速度を反転させて少し跳ねさせる（または 0 にして止める）
+            if (Math.abs(velocityY) > 0.05) {
+                velocityY *= -bounce; 
+            } else {
+                velocityY = 0;
+            }
         }
-
-        // 2. 回転を移動に変換
-        angularVelocity *= CONFIG.AngularFriction;
-        rollPivot.rotation.x += angularVelocity;
-
-        // 物理的な接地面の蹴り出し: 回転速度に応じて移動速度（velocity）が発生する
-        const drive = -angularVelocity * CONFIG.BodyRadius; 
-        velocity.x = Math.sin(playerRoot.rotation.y) * drive;
-        velocity.z = Math.cos(playerRoot.rotation.y) * drive;
-        
-        velocity.multiplyScalar(CONFIG.Friction);
-        playerRoot.position.add(velocity);
-
-        // 3. 絶対接地判定（地面にめり込まない）
-        const ellipseHeight = Math.abs(Math.cos(rollPivot.rotation.x)) * 0.15;
-        // 地面からの高さは「半径 + 形状補正」で、常に 0 以上を保証
-        const minHeight = CONFIG.BodyRadius + ellipseHeight;
-        playerRoot.position.y = Math.max(minHeight, playerRoot.position.y * 0.8 + minHeight * 0.2);
-
-        // 4. 腕の制御
-        const upIntensity = Math.max(0, actionInput.y);
-        const targetRotL = (actionInput.x < 0.3) ? 
-            THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
-        const targetRotR = (actionInput.x > -0.3) ? 
-            THREE.MathUtils.lerp(CONFIG.RelaxAngle, CONFIG.AttackAngle, upIntensity) : CONFIG.RelaxAngle;
-
-        armPivotL.rotation.x = THREE.MathUtils.lerp(armPivotL.rotation.x, targetRotL, 0.2);
-        armPivotR.rotation.x = THREE.MathUtils.lerp(armPivotR.rotation.x, targetRotR, 0.2);
-
-        // 5. カメラ追従
-        camera.position.lerp(playerRoot.position.clone().add(new THREE.Vector3(0, 6, 9)), 0.1);
-        camera.lookAt(playerRoot.position);
 
         renderer.render(scene, camera);
     }
 
     animate();
 
+    // リサイズ対応
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
