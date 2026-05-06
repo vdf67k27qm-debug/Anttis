@@ -3,52 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Parts Adjuster for Mobile</title>
+    <title>3D Parts Adjuster</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; background: #111; touch-action: none; }
-        canvas { display: block; }
         #ui {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.85); color: white;
-            padding: 20px; border-radius: 15px; width: 90%; max-width: 400px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            padding: 15px; border-radius: 15px; width: 90%; max-width: 400px; z-index: 10;
         }
-        .control-group { margin-bottom: 15px; }
-        label { display: block; font-size: 14px; margin-bottom: 8px; color: #00ff88; font-weight: bold; }
-        select { width: 100%; padding: 10px; border-radius: 5px; background: #333; color: white; border: 1px solid #555; font-size: 16px; }
-        input[type="range"] { width: 100%; height: 30px; margin: 5px 0; }
-        .pos-label { display: flex; justify-content: space-between; font-size: 12px; margin-top: 5px; }
-        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
-        button { flex: 1; padding: 10px; border-radius: 5px; border: none; background: #0088ff; color: white; font-weight: bold; cursor: pointer; }
-        button:active { background: #0055aa; }
+        .control-group { margin-bottom: 10px; }
+        label { display: block; font-size: 12px; margin-bottom: 5px; color: #00ff88; }
+        select { width: 100%; padding: 8px; border-radius: 5px; background: #333; color: white; font-size: 16px; }
+        input[type="range"] { width: 100%; height: 25px; }
+        .pos-label { display: flex; justify-content: space-between; font-size: 11px; }
+        button { width: 100%; padding: 10px; border-radius: 5px; border: none; background: #0088ff; color: white; font-weight: bold; margin-top: 5px; }
     </style>
 </head>
 <body>
 
 <div id="ui">
     <div class="control-group">
-        <label>操作対象のパーツ</label>
+        <label>操作パーツ選択</label>
         <select id="partSelect">
-            <option value="Body">Body (体)</option>
-            <option value="Hand_L">Hand L (左手)</option>
-            <option value="Hand_R">Hand R (右手)</option>
+            <option value="Body">体 (Body)</option>
+            <option value="Arm_L">左腕 (Arm L)</option>
+            <option value="Arm_R">右腕 (Arm R)</option>
+            <option value="Hand_L">左手 (Hand L)</option>
+            <option value="Hand_R">右手 (Hand R)</option>
         </select>
     </div>
     
     <div class="control-group">
         <div class="pos-label"><span>左右 (X)</span><span id="valX">0</span></div>
-        <input type="range" id="posX" min="-2" max="2" step="0.01" value="0">
-        
+        <input type="range" id="posX" min="-3" max="3" step="0.01" value="0">
         <div class="pos-label"><span>上下 (Y)</span><span id="valY">0</span></div>
-        <input type="range" id="posY" min="-2" max="2" step="0.01" value="0">
-        
+        <input type="range" id="posY" min="-3" max="3" step="0.01" value="0">
         <div class="pos-label"><span>奥行 (Z)</span><span id="valZ">0</span></div>
-        <input type="range" id="posZ" min="-2" max="2" step="0.01" value="0">
+        <input type="range" id="posZ" min="-3" max="3" step="0.01" value="0">
     </div>
-
-    <div class="btn-group">
-        <button id="cloneBtn">左手を右手にコピー</button>
-    </div>
+    <button id="mirrorBtn">左側の配置を右側に反転コピー</button>
 </div>
 
 <script type="importmap">
@@ -62,81 +55,79 @@
 
 <script type="module">
     import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
+    scene.background = new THREE.Color(0x222222);
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.5, 4);
+    camera.position.set(0, 1, 5);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio); // スマホの高解像度対応
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(ambientLight);
-    
-    const grid = new THREE.GridHelper(10, 20, 0x444444, 0x222222);
-    scene.add(grid);
+    const light = new THREE.DirectionalLight(0xffffff, 2);
+    light.position.set(1, 1, 2);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 1));
+    scene.add(new THREE.GridHelper(10, 10));
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; // 操作に滑らかさを追加
+    const loader = new GLTFLoader();
 
-    // モデル保持用オブジェクト
-    const models = { Body: null, Hand_L: null, Hand_R: null };
+    // モデルを格納するオブジェクト
+    const models = { Body: null, Arm_L: null, Arm_R: null, Hand_L: null, Hand_R: null };
 
-    // ダミーの形状作成
-    function createPart(name, color, size = [1, 1, 1]) {
-        const geo = new THREE.BoxGeometry(...size);
-        const mat = new THREE.MeshStandardMaterial({ color: color });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.name = name;
-        models[name] = mesh;
-        scene.add(mesh);
+    // モデル読み込み
+    function load(name, file, isDuplicate = false, originalName = "") {
+        loader.load(file, (gltf) => {
+            const model = gltf.scene;
+            models[name] = model;
+            scene.add(model);
+            
+            // 初期位置を少しずらす（重ならないように）
+            if (name.includes('_R')) model.position.x = 1;
+            if (name.includes('_L')) model.position.x = -1;
+        }, undefined, (error) => console.error(error));
     }
 
-    // 初期配置
-    createPart('Body', 0x00ff88, [1, 2, 0.5]);
-    createPart('Hand_L', 0xff4400, [0.3, 0.3, 0.3]);
-    createPart('Hand_R', 0xff4400, [0.3, 0.3, 0.3]);
-    
-    models.Hand_L.position.set(-1, 1, 0);
-    models.Hand_R.position.set(1, 1, 0);
+    // GitHub上のファイル名に合わせて読み込み
+    load('Body', 'Pig_Body.glb');
+    load('Arm_L', 'Pig_Arm.glb');
+    load('Arm_R', 'Pig_Arm.glb'); // 同じファイルを複製して使用
+    load('Hand_L', 'Pig_Hand.glb');
+    load('Hand_R', 'Pig_Hand.glb'); // 同じファイルを複製して使用
 
-    // UI要素の取得
+    // UI連動
     const partSelect = document.getElementById('partSelect');
     const sliders = { X: document.getElementById('posX'), Y: document.getElementById('posY'), Z: document.getElementById('posZ') };
     const labels = { X: document.getElementById('valX'), Y: document.getElementById('valY'), Z: document.getElementById('valZ') };
 
-    function updatePosition() {
+    function update() {
         const target = models[partSelect.value];
         if (target) {
-            target.position.x = parseFloat(sliders.X.value);
-            target.position.y = parseFloat(sliders.Y.value);
-            target.position.z = parseFloat(sliders.Z.value);
-            
+            target.position.set(sliders.X.value, sliders.Y.value, sliders.Z.value);
             labels.X.innerText = sliders.X.value;
             labels.Y.innerText = sliders.Y.value;
             labels.Z.innerText = sliders.Z.value;
         }
     }
 
-    // 「左手を右手にコピー」機能
-    document.getElementById('cloneBtn').addEventListener('click', () => {
-        if (models.Hand_L && models.Hand_R) {
-            // X軸だけ反転させ、YとZは同じ位置にする
-            models.Hand_R.position.x = -models.Hand_L.position.x;
-            models.Hand_R.position.y = models.Hand_L.position.y;
-            models.Hand_R.position.z = models.Hand_L.position.z;
-            alert("左手の位置を右手に反転コピーしました");
-        }
+    Object.values(sliders).forEach(s => s.addEventListener('input', update));
+
+    // 反転コピー機能（調整を楽にするため）
+    document.getElementById('mirrorBtn').addEventListener('click', () => {
+        const pairs = [['Arm_L', 'Arm_R'], ['Hand_L', 'Hand_R']];
+        pairs.forEach(([left, right]) => {
+            if (models[left] && models[right]) {
+                models[right].position.set(-models[left].position.x, models[left].position.y, models[left].position.z);
+            }
+        });
     });
 
-    Object.values(sliders).forEach(s => s.addEventListener('input', updatePosition));
-    
-    // アニメーション
     function animate() {
         requestAnimationFrame(animate);
         controls.update();
