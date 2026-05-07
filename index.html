@@ -3,193 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pig Bunny - Precise Capsule Edition</title>
+    <title>Scribble Battle - Touch Edition</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; touch-action: none; }
-        #joystick-wrapper {
-            position: absolute; bottom: 40px; left: 40px;
-            width: 100px; height: 100px; background: rgba(255,255,255,0.1);
-            border-radius: 50%; border: 2px solid rgba(255,255,255,0.2);
-        }
-        #joystick {
-            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
-            background: #ff4488; border-radius: 50%; transform: translate(-50%, -50%);
-        }
+        body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
+        canvas { display: block; margin: 0 auto; }
     </style>
 </head>
 <body>
+<script>
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: '#ffffff',
+    scale: {
+        mode: Phaser.Scale.FIT, // 画面サイズに合わせて自動調整
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 1600 }, debug: false }
+    },
+    scene: { preload: preload, create: create, update: update }
+};
 
-<div id="joystick-wrapper"><div id="joystick"></div></div>
+const game = new Phaser.Game(config);
 
-<script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-        }
+let player, leftHand, rightHand, platforms;
+let isLeft = false;
+let isRight = false;
+let isJump = false;
+
+function preload() {
+    this.load.image('body', 'character_roundRed.png');
+    this.load.image('hand', 'character_handRed.png');
+    this.load.image('ground', 'item_shield.png');
+}
+
+function create() {
+    // 【足場】
+    platforms = this.physics.add.staticGroup();
+    platforms.create(400, 580, 'ground').setScale(10, 1).refreshBody();
+    platforms.create(200, 400, 'ground').setScale(3, 0.5).refreshBody();
+    platforms.create(600, 400, 'ground').setScale(3, 0.5).refreshBody();
+
+    // 【プレイヤー】
+    player = this.physics.add.sprite(400, 400, 'body');
+    player.setCollideWorldBounds(true);
+    player.setDragX(1200);
+
+    leftHand = this.add.sprite(0, 0, 'hand');
+    rightHand = this.add.sprite(0, 0, 'hand');
+
+    this.physics.add.collider(player, platforms);
+
+    // 【画面内コントローラーの実装】
+    const uiY = 500; // ボタンの高さ
+    
+    // 左移動ボタン
+    const btnLeft = this.add.circle(100, uiY, 50, 0x000000, 0.2).setInteractive();
+    this.add.text(85, uiY - 15, '←', { fontSize: '32px', color: '#000' });
+
+    // 右移動ボタン
+    const btnRight = this.add.circle(220, uiY, 50, 0x000000, 0.2).setInteractive();
+    this.add.text(205, uiY - 15, '→', { fontSize: '32px', color: '#000' });
+
+    // ジャンプボタン
+    const btnJump = this.add.circle(700, uiY, 60, 0xff0000, 0.3).setInteractive();
+    this.add.text(660, uiY - 15, 'JUMP', { fontSize: '24px', color: '#000', fontWeight: 'bold' });
+
+    // タッチイベントの登録
+    btnLeft.on('pointerdown', () => { isLeft = true; });
+    btnLeft.on('pointerup', () => { isLeft = false; });
+    btnLeft.on('pointerout', () => { isLeft = false; });
+
+    btnRight.on('pointerdown', () => { isRight = true; });
+    btnRight.on('pointerup', () => { isRight = false; });
+    btnRight.on('pointerout', () => { isRight = false; });
+
+    btnJump.on('pointerdown', () => { isJump = true; });
+    btnJump.on('pointerup', () => { isJump = false; });
+
+    // キーボード操作も一応残しておく
+    this.cursors = this.input.keyboard.createCursorKeys();
+}
+
+function update() {
+    // 左右移動（タッチまたはキーボード）
+    if (isLeft || this.cursors.left.isDown) {
+        player.setAccelerationX(-1800);
+        player.setFlipX(true);
+    } else if (isRight || this.cursors.right.isDown) {
+        player.setAccelerationX(1800);
+        player.setFlipX(false);
+    } else {
+        player.setAccelerationX(0);
     }
-</script>
 
-<script type="module">
-    import * as THREE from 'three';
-    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb);
-    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-    sun.position.set(5, 10, 5);
-    scene.add(sun);
-
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0x55aa55 }));
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
-
-    // --- キャラクター構造 ---
-    const player = new THREE.Group();
-    const rotPivot = new THREE.Group();
-    player.position.y = 3;
-    scene.add(player);
-    player.add(rotPivot);
-
-    const bodyGroup = new THREE.Group();
-    const armL = new THREE.Group(); const armR = new THREE.Group();
-    const handL = new THREE.Group(); const handR = new THREE.Group();
-    rotPivot.add(bodyGroup, armL, armR, handL, handR);
-
-    // モデルの配置（画像分析に基づき微調整）
-    const POS = { arm: { x: 0.35, y: 0.75, z: 0.49 }, hand: { x: 0.35, y: 0.75, z: 0.8 } };
-    armL.position.set(-POS.arm.x, POS.arm.y, POS.arm.z);
-    armR.position.set( POS.arm.x, POS.arm.y, POS.arm.z);
-    handL.position.set(-POS.hand.x, POS.hand.y, POS.hand.z);
-    handR.position.set( POS.hand.x, POS.hand.y, POS.hand.z);
-
-    const loader = new GLTFLoader();
-    async function loadModels() {
-        const load = (url) => new Promise(res => loader.load(url, g => res(g.scene)));
-        const [b, al, ar, hl, hr] = await Promise.all([
-            load('Pig_Body.glb'), load('Pig_Arm.glb'), load('Pig_Arm.glb'), load('Pig_Hand.glb'), load('Pig_Hand.glb')
-        ]);
-        if(b) bodyGroup.add(b); if(al) armL.add(al); if(ar) armR.add(ar); if(hl) handL.add(hl); if(hr) handR.add(hr);
+    // ジャンプ
+    if ((isJump || this.cursors.up.isDown) && player.body.touching.down) {
+        player.setVelocityY(-900);
+        isJump = false; // 押しっぱなし防止
     }
-    loadModels();
 
-    // --- 物理パラメータ（カプセル判定の最適化） ---
-    const physics = {
-        vel: new THREE.Vector3(0, 0, 0),
-        angVel: new THREE.Vector3(0, 0, 0),
-        gravity: -0.012,
-        friction: 0.98,
-        groundFriction: 0.6,
-        airTorque: 0.002,
-        groundTorque: 0.02, // 地面を蹴る力を大幅に強化
-        
-        // 判定用スフィアの設定
-        sphereRadius: 0.4,  // 体の太さ
-        bodyHeight: 1.4,    // 頭から足までの長さ
-        segmentCount: 5     // 判定ポイントの数（多いほど滑らか）
-    };
-
-    let input = new THREE.Vector2(0, 0);
-
-    // ジョイスティック操作
-    window.addEventListener('touchmove', e => {
-        const t = e.touches[0];
-        const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
-        input.set(
-            Math.min(Math.max((t.clientX - (rect.left + 50)) / 50, -1), 1),
-            -Math.min(Math.max((t.clientY - (rect.top + 50)) / 50, -1), 1)
-        );
-        document.getElementById('joystick').style.left = `${50 + input.x * 40}px`;
-        document.getElementById('joystick').style.top = `${50 - input.y * 40}px`;
-    });
-    window.addEventListener('touchend', () => {
-        input.set(0, 0);
-        document.getElementById('joystick').style.left = '50%';
-        document.getElementById('joystick').style.top = '50%';
-    });
-
-    function animate() {
-        requestAnimationFrame(animate);
-
-        physics.vel.y += physics.gravity;
-
-        // --- 体のラインに沿った多点接地判定 ---
-        let isGrounded = false;
-        const halfHeight = physics.bodyHeight / 2;
-        
-        // 頭(top)から足(bottom)まで等間隔に判定点を生成
-        for (let i = 0; i < physics.segmentCount; i++) {
-            const ratio = i / (physics.segmentCount - 1);
-            const localY = -halfHeight + (physics.bodyHeight * ratio);
-            
-            // ローカルの判定点を現在の回転に合わせて世界座標に変換
-            const point = new THREE.Vector3(0, localY, 0).applyQuaternion(rotPivot.quaternion);
-            const worldY = player.position.y + point.y;
-
-            if (worldY <= physics.sphereRadius) {
-                // 接地時の押し戻し
-                const depth = physics.sphereRadius - worldY;
-                player.position.y += depth;
-                isGrounded = true;
-
-                // 地面との接触による蹴り出し（摩擦駆動）
-                // スティック入力 × 回転の勢い を推進力に変える
-                const moveDirection = new THREE.Vector3(0, 0, 0);
-                
-                // 前転・後転による推進
-                physics.vel.z += physics.angVel.x * 0.4;
-                physics.vel.x -= physics.angVel.z * 0.4;
-
-                // 突き刺さり防止：接地している点は垂直速度を殺す
-                if (physics.vel.y < 0) physics.vel.y *= -0.1;
-            }
-        }
-
-        // --- トルク制御 ---
-        if (isGrounded) {
-            // スティック方向に「地面を蹴る」力を加える
-            physics.angVel.x -= input.y * physics.groundTorque;
-            physics.angVel.z -= input.x * physics.groundTorque;
-            
-            // 接地中は少し跳ねる力を追加して「もっさり感」を解消
-            if (input.length() > 0.1) physics.vel.y += 0.005;
-            
-            physics.vel.x *= physics.groundFriction;
-            physics.vel.z *= physics.groundFriction;
-        } else {
-            // 空中では制御力を弱める
-            physics.angVel.x -= input.y * physics.airTorque;
-            physics.angVel.z -= input.x * physics.airTorque;
-        }
-
-        // 回転と位置の更新
-        rotPivot.rotation.x += physics.angVel.x;
-        rotPivot.rotation.z += physics.angVel.z;
-        physics.angVel.multiplyScalar(0.92); // 回転の摩擦
-
-        player.position.add(physics.vel);
-        physics.vel.x *= physics.friction;
-        physics.vel.z *= physics.friction;
-
-        // カメラ追従
-        camera.position.lerp(new THREE.Vector3(player.position.x, player.position.y + 3, player.position.z + 7), 0.1);
-        camera.lookAt(player.position);
-
-        renderer.render(scene, camera);
+    // 手の追従処理
+    let offsetX = 35;
+    let offsetY = 10;
+    if (player.flipX) {
+        leftHand.x = player.x + offsetX;
+        rightHand.x = player.x - offsetX;
+        leftHand.flipX = true;
+        rightHand.flipX = true;
+    } else {
+        leftHand.x = player.x - offsetX;
+        rightHand.x = player.x + offsetX;
+        leftHand.flipX = false;
+        rightHand.flipX = false;
     }
-    animate();
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    
+    let bobbing = Math.sin(this.time.now / 200) * 3;
+    leftHand.y = player.y + offsetY + bobbing;
+    rightHand.y = player.y + offsetY - bobbing;
+}
 </script>
 </body>
 </html>
