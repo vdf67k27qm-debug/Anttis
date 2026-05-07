@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Combat Slash</title>
+    <title>Scribble Battle - Fix Attack</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -30,6 +30,9 @@ const game = new Phaser.Game(config);
 let player, leftHand, rightHand, sword, platforms;
 let isLeft = false, isRight = false;
 let jumpCount = 0;
+
+// 攻撃管理用の変数
+let attackProgress = 0; // 0:構え, 0.5:振り下ろし最大, 1:終了
 let isAttacking = false;
 
 function preload() {
@@ -40,7 +43,7 @@ function preload() {
 }
 
 function create() {
-    this.input.addPointer(3); // マルチタッチを有効化
+    this.input.addPointer(3);
 
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 13; i++) {
@@ -56,7 +59,6 @@ function create() {
 
     leftHand = this.add.sprite(0, 0, 'hand');
     rightHand = this.add.sprite(0, 0, 'hand');
-    // 支点を剣の根元にする (重要)
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.8);
 
     this.physics.add.collider(player, platforms);
@@ -90,54 +92,31 @@ function create() {
         }
     });
 
-    btnA.on('pointerdown', () => attack(this));
+    btnA.on('pointerdown', () => {
+        if (!isAttacking) startAttack(this);
+    });
 
     this.cursors = this.input.keyboard.createCursorKeys();
 }
 
-function attack(scene) {
-    if (isAttacking) return;
+function startAttack(scene) {
     isAttacking = true;
+    attackProgress = 0;
 
-    const direction = player.flipX ? -1 : 1;
-    
-    // アニメーション用のタイムラインを作成
-    const timeline = scene.tweens.createTimeline();
-
-    // 1. 斜め上へ構える (タメ)
-    timeline.add({
-        targets: [sword, rightHand],
-        angle: direction * -45, // 斜め上
-        y: '+=20', // 少し沈み込む
-        x: '-=' + (direction * 15), // 少し引く
-        duration: 100,
-        ease: 'Power1'
-    });
-
-    // 2. 斜め下へ大きく振り下ろす (攻撃)
-    timeline.add({
-        targets: [sword, rightHand],
-        angle: direction * 135, // 斜め下まで約180度
-        y: '+=10', // さらに沈み込む
-        x: '+= ' + (direction * 60), // 前方へ大きく振る
-        duration: 150,
-        ease: 'Circ.easeOut'
-    });
-
-    // 3. 元に戻す (硬直)
-    timeline.add({
-        targets: [sword, rightHand, player],
-        angle: 0,
-        y: player.y, // プレイヤーの位置を元に戻す
-        x: '+=0', // 手を戻す (update関数で処理されるため、ここは0でOK)
-        duration: 150,
-        ease: 'Power1',
+    // 攻撃の進捗だけを管理するTween
+    scene.tweens.add({
+        targets: { val: 0 },
+        val: 1,
+        duration: 350, // 攻撃全体の時間
+        ease: 'Cubic.easeInOut',
+        onUpdate: (tween) => {
+            attackProgress = tween.getValue();
+        },
         onComplete: () => {
             isAttacking = false;
+            attackProgress = 0;
         }
     });
-
-    timeline.play();
 }
 
 function update() {
@@ -156,29 +135,50 @@ function update() {
         jumpCount = 0;
     }
 
+    // --- アニメーション計算 ---
     let walkCycle = Math.sin(this.time.now / 80) * 5;
     let isMoving = Math.abs(player.body.velocity.x) > 20;
+    let groundY = (isMoving && player.body.touching.down) ? walkCycle : 0;
     
-    // 攻撃中でない時だけ上下揺れ
-    let currentY = player.y;
-    if (!isAttacking && isMoving && player.body.touching.down) {
-        currentY += walkCycle;
-    }
-    
+    // 基本の位置
     let side = player.flipX ? 1 : -1;
-    leftHand.setPosition(player.x + (32 * side), currentY + 12);
-    
-    // 攻撃中でない時だけ右手を追従させる
+    leftHand.setPosition(player.x + (32 * side), player.y + 12 + groundY);
+
     if (!isAttacking) {
-        rightHand.setPosition(player.x - (32 * side), currentY + 12);
+        // 通常時
+        rightHand.setPosition(player.x - (32 * side), player.y + 12 + groundY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.setFlipX(player.flipX);
         sword.angle = 0;
+        sword.setFlipX(player.flipX);
     } else {
-        // 攻撃中は剣のXY座標を常に右手に合わせる (Tweensで角度等は制御)
+        // 攻撃中：胴体(player.x, player.y)からの相対位置で計算
+        // attackProgress (0～1) に基づいて 角度と位置を変化させる
+        let swingAngle;
+        let swingX;
+        let swingY;
+
+        if (attackProgress < 0.3) {
+            // 1. 構え (0% - 30%)
+            let p = attackProgress / 0.3;
+            swingAngle = p * -45;
+            swingX = -32 - (p * 10);
+            swingY = 12 + (p * 10);
+        } else {
+            // 2. 振り下ろし (30% - 100%)
+            let p = (attackProgress - 0.3) / 0.7;
+            swingAngle = -45 + (p * 180);
+            swingX = -42 + (p * 80);
+            swingY = 22 + (p * 10);
+        }
+
+        // 胴体位置 + 相対位置（向きを考慮）
+        rightHand.setPosition(player.x + (swingX * side * -1), player.y + swingY);
         sword.setPosition(rightHand.x, rightHand.y);
+        sword.angle = swingAngle * side;
+        sword.setFlipX(player.flipX);
     }
     
+    // 体の傾き
     if (isMoving && player.body.touching.down) {
         player.angle = player.body.velocity.x / 15;
     } else {
