@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - MultiTouch</title>
+    <title>Scribble Battle - Combat Slash</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -40,8 +40,7 @@ function preload() {
 }
 
 function create() {
-    // マルチタッチを有効化 (iPad用)
-    this.input.addPointer(3);
+    this.input.addPointer(3); // マルチタッチを有効化
 
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 13; i++) {
@@ -57,12 +56,11 @@ function create() {
 
     leftHand = this.add.sprite(0, 0, 'hand');
     rightHand = this.add.sprite(0, 0, 'hand');
-    // 剣は横向き（突き）をデフォルトにするため角度を調整
-    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.5);
+    // 支点を剣の根元にする (重要)
+    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.8);
 
     this.physics.add.collider(player, platforms);
 
-    // 【UIボタン配置】
     const uiY = 520;
     const createBtn = (x, y, radius, color, label, size) => {
         const btn = this.add.circle(x, y, radius, color, 0.2).setInteractive();
@@ -75,11 +73,9 @@ function create() {
     const btnJ = createBtn(620, uiY, 50, 0x0000ff, 'JUMP', '18px');
     const btnA = createBtn(730, uiY, 50, 0xff0000, 'ATK', '18px');
 
-    // 同時押しを可能にするイベント処理
     btnL.on('pointerdown', () => isLeft = true);
     btnL.on('pointerup', () => isLeft = false);
     btnL.on('pointerout', () => isLeft = false);
-
     btnR.on('pointerdown', () => isRight = true);
     btnR.on('pointerup', () => isRight = false);
     btnR.on('pointerout', () => isRight = false);
@@ -103,21 +99,45 @@ function attack(scene) {
     if (isAttacking) return;
     isAttacking = true;
 
-    // 突き攻撃のアニメーション
     const direction = player.flipX ? -1 : 1;
-    sword.angle = direction * 90; // 剣を横に寝かせる
+    
+    // アニメーション用のタイムラインを作成
+    const timeline = scene.tweens.createTimeline();
 
-    scene.tweens.add({
+    // 1. 斜め上へ構える (タメ)
+    timeline.add({
         targets: [sword, rightHand],
-        x: '+= ' + (direction * 50), // 前方に鋭く突き出す
-        duration: 80,
-        yoyo: true,
-        ease: 'Cubic.easeOut',
+        angle: direction * -45, // 斜め上
+        y: '+=20', // 少し沈み込む
+        x: '-=' + (direction * 15), // 少し引く
+        duration: 100,
+        ease: 'Power1'
+    });
+
+    // 2. 斜め下へ大きく振り下ろす (攻撃)
+    timeline.add({
+        targets: [sword, rightHand],
+        angle: direction * 135, // 斜め下まで約180度
+        y: '+=10', // さらに沈み込む
+        x: '+= ' + (direction * 60), // 前方へ大きく振る
+        duration: 150,
+        ease: 'Circ.easeOut'
+    });
+
+    // 3. 元に戻す (硬直)
+    timeline.add({
+        targets: [sword, rightHand, player],
+        angle: 0,
+        y: player.y, // プレイヤーの位置を元に戻す
+        x: '+=0', // 手を戻す (update関数で処理されるため、ここは0でOK)
+        duration: 150,
+        ease: 'Power1',
         onComplete: () => {
             isAttacking = false;
-            sword.angle = 0;
         }
     });
+
+    timeline.play();
 }
 
 function update() {
@@ -136,10 +156,14 @@ function update() {
         jumpCount = 0;
     }
 
-    // アニメーション設定
     let walkCycle = Math.sin(this.time.now / 80) * 5;
     let isMoving = Math.abs(player.body.velocity.x) > 20;
-    let currentY = player.y + (isMoving && player.body.touching.down ? walkCycle : 0);
+    
+    // 攻撃中でない時だけ上下揺れ
+    let currentY = player.y;
+    if (!isAttacking && isMoving && player.body.touching.down) {
+        currentY += walkCycle;
+    }
     
     let side = player.flipX ? 1 : -1;
     leftHand.setPosition(player.x + (32 * side), currentY + 12);
@@ -150,9 +174,11 @@ function update() {
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setFlipX(player.flipX);
         sword.angle = 0;
+    } else {
+        // 攻撃中は剣のXY座標を常に右手に合わせる (Tweensで角度等は制御)
+        sword.setPosition(rightHand.x, rightHand.y);
     }
     
-    // 移動時の傾き
     if (isMoving && player.body.touching.down) {
         player.angle = player.body.velocity.x / 15;
     } else {
