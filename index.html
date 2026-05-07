@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Combat Plus</title>
+    <title>Scribble Battle - MultiTouch</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -40,6 +40,9 @@ function preload() {
 }
 
 function create() {
+    // マルチタッチを有効化 (iPad用)
+    this.input.addPointer(3);
+
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 13; i++) {
         platforms.create(32 + (i * 64), 568, 'tile');
@@ -49,34 +52,34 @@ function create() {
 
     player = this.physics.add.sprite(400, 400, 'body');
     player.setCollideWorldBounds(true);
-    
-    // 【調整】スライドを抑え、最大速度を制限
     player.setDragX(3000); 
     player.setMaxVelocity(350, 1000); 
 
     leftHand = this.add.sprite(0, 0, 'hand');
     rightHand = this.add.sprite(0, 0, 'hand');
-    // 剣の支点を中心より少し下にずらして振りやすくする
-    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.8);
+    // 剣は横向き（突き）をデフォルトにするため角度を調整
+    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.5);
 
     this.physics.add.collider(player, platforms);
 
+    // 【UIボタン配置】
     const uiY = 520;
-    const btnL = this.add.circle(80, uiY, 45, 0x000000, 0.1).setInteractive();
-    this.add.text(70, uiY-15, '←', {fontSize:'30px', color:'#000'});
-    
-    const btnR = this.add.circle(180, uiY, 45, 0x000000, 0.1).setInteractive();
-    this.add.text(170, uiY-15, '→', {fontSize:'30px', color:'#000'});
+    const createBtn = (x, y, radius, color, label, size) => {
+        const btn = this.add.circle(x, y, radius, color, 0.2).setInteractive();
+        this.add.text(x, y, label, {fontSize: size, color:'#000', fontWeight:'bold'}).setOrigin(0.5);
+        return btn;
+    };
 
-    const btnJ = this.add.circle(620, uiY, 50, 0x0000ff, 0.2).setInteractive();
-    this.add.text(595, uiY-10, 'JUMP', {fontSize:'18px', color:'#000', fontWeight:'bold'});
+    const btnL = createBtn(80, uiY, 45, 0x000000, '←', '30px');
+    const btnR = createBtn(180, uiY, 45, 0x000000, '→', '30px');
+    const btnJ = createBtn(620, uiY, 50, 0x0000ff, 'JUMP', '18px');
+    const btnA = createBtn(730, uiY, 50, 0xff0000, 'ATK', '18px');
 
-    const btnA = this.add.circle(730, uiY, 50, 0xff0000, 0.3).setInteractive();
-    this.add.text(705, uiY-10, 'ATK', {fontSize:'18px', color:'#000', fontWeight:'bold'});
-
+    // 同時押しを可能にするイベント処理
     btnL.on('pointerdown', () => isLeft = true);
     btnL.on('pointerup', () => isLeft = false);
     btnL.on('pointerout', () => isLeft = false);
+
     btnR.on('pointerdown', () => isRight = true);
     btnR.on('pointerup', () => isRight = false);
     btnR.on('pointerout', () => isRight = false);
@@ -100,14 +103,16 @@ function attack(scene) {
     if (isAttacking) return;
     isAttacking = true;
 
-    // 【調整】剣を160度まで大きく振り下ろすアニメーション
+    // 突き攻撃のアニメーション
+    const direction = player.flipX ? -1 : 1;
+    sword.angle = direction * 90; // 剣を横に寝かせる
+
     scene.tweens.add({
-        targets: sword,
-        angle: player.flipX ? -160 : 160,
-        x: player.flipX ? sword.x - 20 : sword.x + 20, // 振り下ろすときに少し前に出す
-        duration: 150,
-        ease: 'Back.easeOut',
+        targets: [sword, rightHand],
+        x: '+= ' + (direction * 50), // 前方に鋭く突き出す
+        duration: 80,
         yoyo: true,
+        ease: 'Cubic.easeOut',
         onComplete: () => {
             isAttacking = false;
             sword.angle = 0;
@@ -116,7 +121,6 @@ function attack(scene) {
 }
 
 function update() {
-    // 【調整】空中でも移動できるように加速度を常にチェック
     let accel = 3500;
     if (isLeft || this.cursors.left.isDown) {
         player.setAccelerationX(-accel);
@@ -132,21 +136,23 @@ function update() {
         jumpCount = 0;
     }
 
-    // アニメーション関連
+    // アニメーション設定
     let walkCycle = Math.sin(this.time.now / 80) * 5;
     let isMoving = Math.abs(player.body.velocity.x) > 20;
     let currentY = player.y + (isMoving && player.body.touching.down ? walkCycle : 0);
     
     let side = player.flipX ? 1 : -1;
     leftHand.setPosition(player.x + (32 * side), currentY + 12);
-    rightHand.setPosition(player.x - (32 * side), currentY + 12);
     
-    // 攻撃中でなければ剣の位置を固定
+    // 攻撃中でない時だけ右手を追従させる
     if (!isAttacking) {
+        rightHand.setPosition(player.x - (32 * side), currentY + 12);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setFlipX(player.flipX);
+        sword.angle = 0;
     }
     
+    // 移動時の傾き
     if (isMoving && player.body.touching.down) {
         player.angle = player.body.velocity.x / 15;
     } else {
