@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Rabbit Knight Pro</title>
+    <title>Scribble Battle - Rabbit Knight Fixed</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -27,10 +27,13 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-let player, head, leftHand, rightHand, sword, platforms;
+// プレイヤーをコンテナ（Container）に変更
+let playerContainer, body, head, leftHand, rightHand, sword;
+let platforms;
 let jumpCount = 0;
 let isAttacking = false;
-let attackProgress = 0;
+let attackTween; // アニメーションを管理
+
 let joyInput = { x: 0, y: 0, active: false };
 
 function preload() {
@@ -51,22 +54,35 @@ function create() {
     platforms.create(200, 350, 'tile');
     platforms.create(600, 350, 'tile');
 
-    player = this.physics.add.sprite(400, 400, 'body');
-    player.setCollideWorldBounds(true);
-    player.setDragX(3500); 
-    player.setMaxVelocity(400, 1200);
-    player.setDepth(10);
+    // --- プレイヤーのコンテナ構築 ---
+    playerContainer = this.add.container(400, 400);
 
-    head = this.add.sprite(0, 0, 'head').setDepth(11);
-    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
-    leftHand = this.add.sprite(0, 0, 'hand').setDepth(13);
-    rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
+    // パーツを作成してコンテナに追加（追加順がレイヤー順になる）
+    leftHand = this.add.sprite(-40, 10, 'hand').setFlipX(true); // 左手（奥側）
+    sword = this.add.sprite(40, 10, 'sword').setOrigin(0.5, 0.9); // 剣（手の下）
+    body = this.add.sprite(0, 0, 'body'); // 胴体
+    head = this.add.sprite(0, -32, 'head'); // 頭（体の上）
+    rightHand = this.add.sprite(40, 10, 'hand'); // 右手（手前側）
 
-    this.physics.add.collider(player, platforms, null, (p, tile) => {
+    // コンテナへ追加（下から順：左手、剣、胴体、頭、右手）
+    playerContainer.add([leftHand, sword, body, head, rightHand]);
+
+    // コンテナ全体に物理演算を適用
+    this.physics.world.enable(playerContainer);
+    playerContainer.body.setCollideWorldBounds(true);
+    playerContainer.body.setDragX(3500); 
+    playerContainer.body.setMaxVelocity(400, 1200);
+    // 物理ボディのサイズを胴体に合わせる
+    playerContainer.body.setSize(body.width, body.height);
+    playerContainer.body.setOffset(-body.width/2, -body.height/2);
+
+
+    this.physics.add.collider(playerContainer, platforms, null, (p, tile) => {
         if (joyInput.y > 0.5 && tile.y > p.y) return false;
         return true;
     });
 
+    // UI作成
     const uiY = 480;
     const joyBase = this.add.circle(120, uiY, 60, 0x000000, 0.1).setDepth(100);
     const joyStick = this.add.circle(120, uiY, 30, 0x000000, 0.2).setDepth(101);
@@ -95,8 +111,8 @@ function create() {
     this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', color:'#000'}).setOrigin(0.5).setDepth(101);
 
     btnJ.on('pointerdown', () => {
-        if (player.body.touching.down) { jumpCount = 1; player.setVelocityY(-950); }
-        else if (jumpCount < 2) { jumpCount++; player.setVelocityY(-850); }
+        if (playerContainer.body.touching.down) { jumpCount = 1; playerContainer.body.setVelocityY(-950); }
+        else if (jumpCount < 2) { jumpCount++; playerContainer.body.setVelocityY(-850); }
     });
 
     btnA.on('pointerdown', () => { if (!isAttacking) startAttack(this); });
@@ -106,69 +122,86 @@ function create() {
 
 function startAttack(scene) {
     isAttacking = true;
-    attackProgress = 0;
-    scene.tweens.add({
-        targets: { val: 0 },
-        val: 1,
-        duration: 250,
-        ease: 'Cubic.easeOut',
-        onUpdate: (tween) => { attackProgress = tween.getValue(); },
-        onComplete: () => { isAttacking = false; attackProgress = 0; }
+
+    // 以前のアニメーションがあれば停止
+    if (attackTween) attackTween.stop();
+
+    // 攻撃アニメーション（右手と剣だけを動かす）
+    // 斜め上から前方への「切り下ろし」軌道
+    attackTween = scene.tweens.timeline({
+        tweens: [
+            {
+                // 1. 振り上げ（タメ）
+                targets: [rightHand, sword],
+                x: { from: 40, to: 0 },
+                y: { from: 10, to: -40 },
+                angle: { from: 0, to: -60 }, // 剣を後ろ上へ傾ける
+                duration: 60,
+                ease: 'Cubic.easeOut'
+            },
+            {
+                // 2. 切り下ろし
+                targets: [rightHand, sword],
+                x: { from: 0, to: 70 },
+                y: { from: -40, to: 30 },
+                angle: { from: -60, to: 120 }, // 前方斜め下へ一気に振る
+                duration: 150,
+                ease: 'Expo.easeOut',
+                onComplete: () => {
+                    // 3. 元の位置に戻る
+                    scene.tweens.add({
+                        targets: [rightHand, sword],
+                        x: 40, y: 10, angle: 0,
+                        duration: 100,
+                        ease: 'Cubic.easeIn',
+                        onComplete: () => { isAttacking = false; }
+                    });
+                }
+            }
+        ]
     });
 }
 
 function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     if (Math.abs(moveX) > 0.2) {
-        player.setAccelerationX(moveX * 4000);
-        player.setFlipX(moveX < 0);
-    } else {
-        player.setAccelerationX(0);
-    }
-    if (player.body.touching.down) jumpCount = 0;
-
-    let isMoving = Math.abs(player.body.velocity.x) > 20;
-    let time = this.time.now;
-    let idleBounce = !isMoving ? Math.sin(time / 400) * 2 : 0;
-    let walkCycle = Math.sin(time / 100) * 8;
-    let bounceY = (isMoving && player.body.touching.down) ? walkCycle : idleBounce;
-    let targetAngle = isMoving ? player.body.velocity.x / 20 : 0;
-    player.setAngle(targetAngle);
-    let side = player.flipX ? -1 : 1; 
-
-    // 頭：常にプレイヤー本体（胴体）の中心に完全固定。角度のみプレイヤー本体に合わせる。
-    head.setPosition(player.x, player.y - 32 + idleBounce); // 待機時の揺れのみ頭に反映
-    head.setAngle(player.angle);
-    head.setFlipX(player.flipX);
-
-    // 手・剣の更新（こちらは bounceY を含める）
-    leftHand.setPosition(player.x - (40 * side), player.y + 10 + bounceY);
-    leftHand.setAngle(player.angle);
-    leftHand.setFlipX(player.flipX);
-
-    if (!isAttacking) {
-        rightHand.setPosition(player.x + (40 * side), player.y + 10 + bounceY);
-        sword.setPosition(rightHand.x, rightHand.y);
-        sword.setAngle(player.angle);
-        sword.setFlipX(player.flipX);
-    } else {
-        let swingAngle, offsetX, offsetY;
-        if (attackProgress < 0.2) {
-            let p = attackProgress / 0.2;
-            swingAngle = p * -60; 
-            offsetX = 40 - (p * 15);
-            offsetY = 10 - (p * 20);
-        } else {
-            let p = (attackProgress - 0.2) / 0.8;
-            swingAngle = -60 + (p * 180); 
-            offsetX = 25 + (p * 60);
-            offsetY = -10 + (p * 40);
-        }
+        playerContainer.body.setAccelerationX(moveX * 4000);
         
-        rightHand.setPosition(player.x + (offsetX * side), player.y + offsetY + bounceY);
-        sword.setPosition(rightHand.x, rightHand.y);
-        sword.setAngle((swingAngle * side) + player.angle);
-        sword.setFlipX(player.flipX);
+        // --- 向き（Flip）の処理 ---
+        // コンテナ全体の scaleX を変えることで、全パーツの向きを一括で反転
+        if (moveX < 0) {
+            playerContainer.setScale(-1, 1); // 左向き
+        } else {
+            playerContainer.setScale(1, 1); // 右向き
+        }
+    } else {
+        playerContainer.body.setAccelerationX(0);
+    }
+    if (playerContainer.body.touching.down) jumpCount = 0;
+
+    // --- モーション（アニメーション） ---
+    let isMoving = Math.abs(playerContainer.body.velocity.x) > 20;
+    let time = this.time.now;
+    
+    // 待機時の呼吸（コンテナ全体の上下動）
+    let idleBounce = !isMoving ? Math.sin(time / 400) * 2 : 0;
+    
+    // 歩行時の上下動
+    let walkCycle = Math.sin(time / 100) * 6;
+    let bounceY = (isMoving && playerContainer.body.touching.down) ? walkCycle : idleBounce;
+    
+    // コンテナ全体の位置に bounceY を適用
+    playerContainer.y = 400 + playerContainer.body.deltaY() + bounceY; // deltaYで物理位置補正
+    
+    // 移動時のわずかな傾き（コンテナ全体）
+    let targetAngle = isMoving ? playerContainer.body.velocity.x / 30 : 0;
+    playerContainer.setAngle(targetAngle);
+
+    // --- 攻撃時以外の剣の初期位置を保証 ---
+    if (!isAttacking) {
+        rightHand.setPosition(40, 10);
+        sword.setPosition(40, 10);
+        sword.setAngle(0);
     }
 }
 </script>
