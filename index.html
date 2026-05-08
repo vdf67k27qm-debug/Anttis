@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Final Adjustments</title>
+    <title>Scribble Battle - Rabbit Sword Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -37,7 +37,8 @@ function preload() {
     this.load.image('head', 'rabbit_head.png');
     this.load.image('body', 'rabbit_body.png');
     this.load.image('hand', 'rabbit_hand.png');
-    this.load.image('sword', 'sword.png');
+    // --- 画像パスを rabbit_sword.png に変更 ---
+    this.load.image('sword', 'rabbit_sword.png');
     this.load.image('tile', 'tile_top.png');
 }
 
@@ -73,7 +74,6 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
-    // 【修正】地面すり抜け機能を削除（単純なコライダーに）
     this.physics.add.collider(playerMain, platforms);
 
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
@@ -135,7 +135,7 @@ function startAttack(scene) {
     scene.tweens.add({
         targets: { val: 0 },
         val: 1,
-        duration: 200, // 少し速くして鋭さを出しました
+        duration: 200, 
         ease: 'Cubic.easeOut',
         onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; attackProgress = 0; }
@@ -174,18 +174,16 @@ function update() {
         rightHand.setPosition(px + (40 * side), py + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle(playerMain.angle);
-        // 【修正】剣を縦に伸ばす (1 -> 1.3)
         sword.setScale(side, 1.3);
     } else {
         let swingAngle, offsetX, offsetY;
         if (attackProgress < 0.2) {
             let p = attackProgress / 0.2;
-            swingAngle = p * -80; // 振りかぶりを大きく
+            swingAngle = p * -80; 
             offsetX = 40 - (p * 20);
             offsetY = 10 - (p * 30);
         } else {
             let p = (attackProgress - 0.2) / 0.8;
-            // 【修正】振り下ろし角度を 210° まで拡大（斜め下までしっかり下りる）
             swingAngle = -80 + (p * 290); 
             offsetX = 20 + (p * 65);
             offsetY = -20 + (p * 60);
@@ -193,7 +191,6 @@ function update() {
         rightHand.setPosition(px + (offsetX * side), py + offsetY + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle((swingAngle * side) + playerMain.angle);
-        // 【修正】攻撃中も剣を伸ばす
         sword.setScale(side, 1.3);
     }
 }
