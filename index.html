@@ -33,10 +33,15 @@ let isAttacking = false;
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
 let attackProgress = 0;
+
+// 入力管理用
 let joyInput = { x: 0, y: 0 };
 let atkJoyInput = { x: 0, y: 0 };
+let movePointerId = null;
+let atkPointerId = null;
 
 function preload() {
+    // GitHub Pagesの相対パスを考慮（画像がない場合はPhaserのデフォルト矩形が表示されます）
     this.load.image('head', 'rabbit_head.png');
     this.load.image('body', 'rabbit_body.png');
     this.load.image('hand', 'rabbit_hand.png');
@@ -46,17 +51,19 @@ function preload() {
 
 function create() {
     const scene = this;
-    this.input.addPointer(3);
+    this.input.addPointer(3); // マルチタッチ対応
 
     const worldWidth = 2000;
     const worldHeight = 800;
 
+    // 足場設定
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 32; i++) platforms.create(32 + (i * 64), 750, 'tile');
     platforms.create(400, 550, 'tile');
     platforms.create(800, 400, 'tile');
     platforms.create(1200, 550, 'tile');
 
+    // プレイヤー本体（Container）
     playerMain = this.add.container(400, 600);
     body = this.add.sprite(0, 0, 'body');
     head = this.add.sprite(0, -32, 'head');
@@ -67,20 +74,22 @@ function create() {
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(3500); 
     playerMain.body.setMaxVelocity(400, 1200);
-    // 物理ボディの最適化
     playerMain.body.setSize(60, 90);
     playerMain.body.setOffset(-30, -45);
 
+    // 装飾パーツ
     leftHand = this.add.sprite(0, 0, 'hand').setDepth(10);
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
     this.physics.add.collider(playerMain, platforms);
 
+    // カメラ設定
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
+    // UI設定
     const setupUI = () => {
         const uiY = 510;
         const joyX = 110;
@@ -96,17 +105,32 @@ function create() {
         const atkStick = this.add.circle(atkX, uiY, 20, 0xff0000, 0.2).setScrollFactor(0).setDepth(101);
 
         // ジャンプボタン
-        const btnJ = this.add.circle(atkX - 85, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
-        this.add.text(atkX - 85, uiY + 10, 'JUMP', {fontSize:'12px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+        const btnJ = this.add.circle(atkX - 95, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
+        this.add.text(atkX - 95, uiY + 10, 'JUMP', {fontSize:'12px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+
+        // タッチ開始判定
+        this.input.on('pointerdown', (p) => {
+            // ジャンプボタン優先
+            if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 95, uiY + 10) < 35) return;
+
+            // 移動スティック開始
+            if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) {
+                movePointerId = p.id;
+            }
+            // 攻撃スティック開始（ここがバグ修正のポイント）
+            if (Phaser.Math.Distance.Between(p.x, p.y, atkX, uiY) < radius) {
+                atkPointerId = p.id;
+            }
+        });
 
         this.input.on('pointermove', (p) => {
-            if (p.x < 300 && p.isDown) {
+            if (p.id === movePointerId) {
                 const ang = Phaser.Math.Angle.Between(joyX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(joyX, uiY, p.x, p.y), radius);
                 joyStick.setPosition(joyX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 joyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
-            if (p.x > 500 && p.isDown) {
+            if (p.id === atkPointerId) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
                 atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
@@ -115,18 +139,21 @@ function create() {
         });
 
         this.input.on('pointerup', (p) => {
-            if (p.x < 300) {
+            if (p.id === movePointerId) {
                 joyStick.setPosition(joyX, uiY);
                 joyInput = { x: 0, y: 0 };
+                movePointerId = null;
             }
-            if (p.x > 500) {
+            if (p.id === atkPointerId) {
                 if (!isAttacking) {
                     const d = Phaser.Math.Distance.Between(atkX, uiY, atkStick.x, atkStick.y);
+                    // デッドゾーン判定（20px以上動かせば斬撃、未満なら突き）
                     if (d > 20) startAttack(scene, 'slash', {x: atkJoyInput.x, y: atkJoyInput.y});
                     else startAttack(scene, 'stab');
                 }
                 atkStick.setPosition(atkX, uiY);
                 atkJoyInput = { x: 0, y: 0 };
+                atkPointerId = null;
             }
         });
 
@@ -145,23 +172,22 @@ function create() {
 }
 
 function startAttack(scene, type, dir = null) {
+    if (isAttacking) return;
     isAttacking = true;
     attackType = type;
     attackProgress = 0;
     
-    if (dir) {
-        // 攻撃した方向に向きを固定
+    if (dir && (Math.abs(dir.x) > 0.1 || Math.abs(dir.y) > 0.1)) {
         if (Math.abs(dir.x) > 0.1) playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
         attackDir = dir;
     } else {
-        // タップ時は現在の向きを維持
         attackDir = { x: playerMain.scaleX, y: 0 };
     }
 
     scene.tweens.add({
         targets: { val: 0 },
         val: 1,
-        duration: type === 'stab' ? 350 : 250,
+        duration: type === 'stab' ? 300 : 250,
         ease: 'Cubic.easeOut',
         onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; }
@@ -171,7 +197,6 @@ function startAttack(scene, type, dir = null) {
 function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
-    // 攻撃中以外のみ向きを変えられるように制限
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * 4000);
@@ -180,7 +205,6 @@ function update() {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        // 攻撃中は加速のみ（向きはstartAttackで決めた方向に固定）
         playerMain.body.setAccelerationX(moveX * 4000);
     }
     
@@ -196,6 +220,7 @@ function update() {
     let side = playerMain.scaleX;
     let px = playerMain.x, py = playerMain.y;
 
+    // 左手の位置（常に体に対して一定）
     leftHand.setPosition(px - (40 * side), py + 10 + bounceY);
     leftHand.setScale(side, 1);
 
@@ -206,27 +231,25 @@ function update() {
         sword.setScale(side, 1.3);
     } else {
         if (attackType === 'stab') {
-            // 2連突き
             let p = (attackProgress * 2) % 1; 
             let thrust = Math.sin(p * Math.PI) * 70;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 10 + bounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
         } else {
-            // 方向別振りかざし
             let p = attackProgress;
             let startAng, endAng;
             
-            if (attackDir.y < -0.4) { // 上
+            if (attackDir.y < -0.4) { 
                 startAng = 160; endAng = -20;
-            } else if (attackDir.y > 0.4) { // 下
+            } else if (attackDir.y > 0.4) { 
                 startAng = 20; endAng = 200;
-            } else { // 横
+            } else { 
                 startAng = -60; endAng = 220;
             }
             
             let currentAng = startAng + (p * (endAng - startAng));
-            let radius = 60;
+            let radius = 65;
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * radius;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * radius;
             
