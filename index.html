@@ -62,9 +62,10 @@ function create() {
     platforms.create(1200, 550, 'tile');
 
     playerMain = this.add.container(400, 600);
-    // 設置感改善のためbodyの初期yをわずかに調整(接地ライン合わせ)
-    body = this.add.sprite(0, 0, 'body');
-    head = this.add.sprite(0, -32, 'head');
+    
+    // スプライトの基準点を y=8 下げて接地させる
+    body = this.add.sprite(0, 8, 'body');
+    head = this.add.sprite(0, -24, 'head'); // 32 - 8 = 24
     playerMain.add([body, head]);
     playerMain.setDepth(11);
 
@@ -73,7 +74,7 @@ function create() {
     playerMain.body.setDragX(3500); 
     playerMain.body.setMaxVelocity(400, 1200);
     
-    // 物理ボディの底辺をContainerの基準点に合わせる
+    // 物理ボディサイズは維持し、スプライトの位置で接地を合わせる
     playerMain.body.setSize(60, 90);
     playerMain.body.setOffset(-30, -45);
 
@@ -195,31 +196,40 @@ function update() {
 
     let time = this.time.now;
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
+    let isOnGround = playerMain.body.touching.down;
     
-    // 呼吸と歩行のモーション切り替え
     let bounceY = 0;
     let headOffset = 0;
-    if (isMoving) {
+
+    if (!isOnGround) {
+        // 空中ポーズ（少し足をすくめる）
+        bounceY = -4;
+        headOffset = -2;
+    } else if (isMoving) {
         // 歩行時：激しい上下動
         bounceY = Math.sin(time / 100) * 8;
         headOffset = bounceY;
     } else {
-        // 静止時：ゆっくりした呼吸（Idle）
-        bounceY = Math.sin(time / 800) * 2.5; 
-        headOffset = bounceY * 1.4; // 頭を少し多めに動かして生命感を出す
+        // 静止時：少し早めの呼吸リズム (800ms -> 350ms)
+        // 足元を動かさず、胴体と頭だけが伸縮するように調整
+        let breathe = Math.sin(time / 350);
+        bounceY = breathe * 2; 
+        headOffset = breathe * 4; 
     }
     
-    body.y = bounceY;
-    head.y = -32 + headOffset;
+    // スプライト位置に基本オフセット 8px を加算して適用
+    body.y = 8 + bounceY;
+    head.y = -24 + headOffset;
 
     let side = playerMain.scaleX;
     let px = playerMain.x, py = playerMain.y;
 
-    leftHand.setPosition(px - (40 * side), py + 10 + bounceY);
+    // 手の位置も接地修正に合わせて調整 (y+18)
+    leftHand.setPosition(px - (40 * side), py + 18 + bounceY);
     leftHand.setScale(side, 1);
 
     if (!isAttacking) {
-        rightHand.setPosition(px + (40 * side), py + 10 + bounceY);
+        rightHand.setPosition(px + (40 * side), py + 18 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle(0);
         sword.setScale(side, 1.3);
@@ -227,7 +237,7 @@ function update() {
         if (attackType === 'stab') {
             let p = (attackProgress * 2) % 1; 
             let thrust = Math.sin(p * Math.PI) * 70;
-            rightHand.setPosition(px + ((40 + thrust) * side), py + 10 + bounceY);
+            rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + bounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
         } else {
@@ -247,7 +257,7 @@ function update() {
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * radius;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * radius;
             
-            rightHand.setPosition(px + (sweepX * side), py + sweepY + bounceY);
+            rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + bounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle((currentAng + 90) * side);
         }
