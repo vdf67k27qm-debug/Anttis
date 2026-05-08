@@ -154,12 +154,10 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
-    // 【修正】強い左右入力（閾値0.5）があった場合のみ向きを更新
     if (dir && Math.abs(dir.x) > 0.5) {
         playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
         attackDir = dir;
     } else {
-        // 上下狙いや入力が弱い場合は、現在の向きを維持
         attackDir = dir ? dir : { x: playerMain.scaleX, y: 0 };
     }
 
@@ -177,7 +175,6 @@ function update() {
     
     if (Math.abs(moveX) > 0.2) {
         playerMain.body.setAccelerationX(moveX * 4000);
-        // 攻撃中でない時のみ、移動入力で向きを変える
         if (!isAttacking) playerMain.setScale(moveX < 0 ? -1 : 1, 1);
     } else {
         playerMain.body.setAccelerationX(0);
@@ -194,7 +191,8 @@ function update() {
     let totalBounceY = 0;
     let leanAngle = 0;
 
-    if (isMoving && !isAttacking) {
+    // 【修正】攻撃中（isAttacking）であっても速度があれば体を傾けるように変更
+    if (isMoving) {
         leanAngle = (playerMain.body.velocity.x / 400) * 12;
     }
 
@@ -211,13 +209,15 @@ function update() {
     
     body.y = 8 + totalBounceY;
     head.y = -24 + totalBounceY;
-    playerMain.setAngle(isAttacking ? 0 : leanAngle);
+    // 【修正】攻撃中かどうかにかかわらず leanAngle を適用
+    playerMain.setAngle(leanAngle);
 
     if (isOnGround) jumpCount = 0;
 
     let px = playerMain.x, py = playerMain.y;
     leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
     leftHand.setScale(side, 1);
+    // 体の傾き（playerMain.angle）に合わせて手の位置も回転させる
     leftHand.setAngle(playerMain.angle);
 
     if (!isAttacking) {
@@ -227,6 +227,7 @@ function update() {
         sword.setAngle(playerMain.angle);
         sword.setScale(side, 1.3);
     } else {
+        // 攻撃時は右手の基本角度を0にするが、追従位置は傾いた体（playerMain）に依存
         rightHand.setAngle(0); 
         if (attackType === 'stab') {
             let p = (attackProgress * 2) % 1; 
@@ -243,7 +244,6 @@ function update() {
             
             let currentAng = startAng + (p * (endAng - startAng));
             let radius = 65;
-            // 【修正】現在のsideを反映させて、向きに依存した軌道を確保
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * radius;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * radius;
             
