@@ -222,13 +222,13 @@ function update() {
             
             // 方向別角度定義（サイド反転を考慮した正規化）
             if (attackDir.y < -0.4) { 
-                // 上斬り: 頭上を大きく旋回 (対空)
-                startAng = 210; endAng = -30;
+                // 上斬り: 負の数値範囲を使って「頭上」を通過させる修正
+                startAng = -150; endAng = -30;
             } else if (attackDir.y > 0.4) { 
                 // 下斬り: 前方下部をなぎ払う
                 startAng = 20; endAng = 160;
             } else { 
-                // 横斬り: 斜め上から足元まで (コンパクトに修正)
+                // 横斬り: 斜め上(-60)から斜め下(60)まで
                 startAng = -60; endAng = 60;
             }
             
