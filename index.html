@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Camera Follow</title>
+    <title>Scribble Battle - Fixed Controls</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -42,23 +42,20 @@ function preload() {
 }
 
 function create() {
+    const scene = this;
     this.input.addPointer(3);
 
-    // ステージを広くする（カメラ追従を確認しやすくするため）
     const worldWidth = 2000;
     const worldHeight = 800;
 
     platforms = this.physics.add.staticGroup();
-    // 地面を長く配置
     for (let i = 0; i < 32; i++) {
         platforms.create(32 + (i * 64), 750, 'tile');
     }
-    // 空中の足場をいくつか追加
     platforms.create(400, 550, 'tile');
     platforms.create(800, 400, 'tile');
     platforms.create(1200, 550, 'tile');
 
-    // メインコンテナ
     playerMain = this.add.container(400, 600);
     body = this.add.sprite(0, 0, 'body');
     head = this.add.sprite(0, -32, 'head');
@@ -72,7 +69,6 @@ function create() {
     playerMain.body.setSize(60, 80);
     playerMain.body.setOffset(-30, -40);
 
-    // 手と武器
     leftHand = this.add.sprite(0, 0, 'hand').setDepth(10);
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
@@ -82,54 +78,59 @@ function create() {
         return true;
     });
 
-    // --- カメラの設定 ---
-    // 物理世界の境界を設定
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
-    // カメラの移動範囲を物理世界のサイズに合わせる
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    // プレイヤーへの追従を開始（遊び: 0.1 0.1 を入れると少し遅れて付いてくるスマブラ風になります）
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
-    // --- UI（カメラに固定する必要があるパーツ） ---
+    // --- UI（クリック判定を確実にするため setupUI 内を修正） ---
     const setupUI = () => {
-        const uiContainer = this.add.container(0, 0).setScrollFactor(0); // 追従させない設定
-        uiContainer.setDepth(100);
-
         const uiY = 480;
-        const joyBase = this.add.circle(120, uiY, 60, 0x000000, 0.1);
-        const joyStick = this.add.circle(120, uiY, 30, 0x000000, 0.2);
+        
+        // ジョイスティック
+        const joyBase = this.add.circle(120, uiY, 60, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
+        const joyStick = this.add.circle(120, uiY, 30, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointermove', (pointer) => {
+            // pointer.position を使うことでカメラ移動の影響を無視
             if (pointer.x < 400 && pointer.isDown) {
-                const dist = Phaser.Math.Distance.Between(joyBase.x, joyBase.y, pointer.x, pointer.y);
-                const angle = Phaser.Math.Angle.Between(joyBase.x, joyBase.y, pointer.x, pointer.y);
+                const dist = Phaser.Math.Distance.Between(120, uiY, pointer.x, pointer.y);
+                const angle = Phaser.Math.Angle.Between(120, uiY, pointer.x, pointer.y);
                 const limitedDist = Math.min(dist, 60);
-                joyStick.x = joyBase.x + Math.cos(angle) * limitedDist;
-                joyStick.y = joyBase.y + Math.sin(angle) * limitedDist;
+                joyStick.x = 120 + Math.cos(angle) * limitedDist;
+                joyStick.y = uiY + Math.sin(angle) * limitedDist;
                 joyInput.x = Math.cos(angle) * (limitedDist / 60);
                 joyInput.y = Math.sin(angle) * (limitedDist / 60);
             }
         });
 
-        this.input.on('pointerup', () => {
-            joyStick.setPosition(joyBase.x, joyBase.y);
-            joyInput = { x: 0, y: 0, active: false };
+        this.input.on('pointerup', (pointer) => {
+            if (pointer.x < 400) {
+                joyStick.setPosition(120, uiY);
+                joyInput = { x: 0, y: 0, active: false };
+            }
         });
 
-        const btnJ = this.add.circle(620, uiY - 40, 55, 0x0000ff, 0.2).setInteractive();
-        const txtJ = this.add.text(620, uiY - 40, 'JUMP', {fontSize:'20px', color:'#000'}).setOrigin(0.5);
+        // ボタンの作成（コンテナに入れず個別に配置し、ScrollFactorを0にする）
+        const btnJ = this.add.circle(620, uiY - 40, 55, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
+        this.add.text(620, uiY - 40, 'JUMP', {fontSize:'20px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
-        const btnA = this.add.circle(710, uiY + 40, 55, 0xff0000, 0.3).setInteractive();
-        const txtA = this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', color:'#000'}).setOrigin(0.5);
+        const btnA = this.add.circle(710, uiY + 40, 55, 0xff0000, 0.3).setInteractive().setScrollFactor(0).setDepth(100);
+        this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
+        // ボタンイベント
         btnJ.on('pointerdown', () => {
-            if (playerMain.body.touching.down) { jumpCount = 1; playerMain.body.setVelocityY(-950); }
-            else if (jumpCount < 2) { jumpCount++; playerMain.body.setVelocityY(-850); }
+            if (playerMain.body.touching.down) {
+                jumpCount = 1;
+                playerMain.body.setVelocityY(-1000);
+            } else if (jumpCount < 2) {
+                jumpCount++;
+                playerMain.body.setVelocityY(-900);
+            }
         });
 
-        btnA.on('pointerdown', () => { if (!isAttacking) startAttack(this); });
-
-        uiContainer.add([joyBase, joyStick, btnJ, txtJ, btnA, txtA]);
+        btnA.on('pointerdown', () => {
+            if (!isAttacking) startAttack(scene);
+        });
     };
     setupUI();
 
@@ -165,6 +166,7 @@ function update() {
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let bounceY = isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 400) * 2;
     
+    // パーツの相対位置のみ更新
     body.y = bounceY;
     head.y = -32 + bounceY;
     playerMain.setAngle(isMoving ? playerMain.body.velocity.x / 20 : 0);
