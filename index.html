@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Rabbit Knight Fix</title>
+    <title>Scribble Battle - Rabbit Knight Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -55,14 +55,10 @@ function create() {
     player.setCollideWorldBounds(true);
     player.setDragX(3500); 
     player.setMaxVelocity(400, 1200);
-    player.setDepth(10); // 胴体を一番下に（背景側）
+    player.setDepth(10);
 
     head = this.add.sprite(0, 0, 'head').setDepth(11);
-    
-    // 剣を手の後ろに配置するために depth を設定
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
-    
-    // 手を一番上のレイヤーに設定
     leftHand = this.add.sprite(0, 0, 'hand').setDepth(13);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
@@ -87,11 +83,9 @@ function create() {
         }
     });
 
-    this.input.on('pointerup', (pointer) => {
-        if (pointer.x < 400) {
-            joyStick.setPosition(joyBase.x, joyBase.y);
-            joyInput = { x: 0, y: 0, active: false };
-        }
+    this.input.on('pointerup', () => {
+        joyStick.setPosition(joyBase.x, joyBase.y);
+        joyInput = { x: 0, y: 0, active: false };
     });
 
     const btnJ = this.add.circle(620, uiY - 40, 55, 0x0000ff, 0.2).setInteractive().setDepth(100);
@@ -133,25 +127,38 @@ function update() {
     }
     if (player.body.touching.down) jumpCount = 0;
 
-    let walkCycle = Math.sin(this.time.now / 100) * 8;
+    // --- モーション計算 ---
     let isMoving = Math.abs(player.body.velocity.x) > 20;
-    let bounceY = (isMoving && player.body.touching.down) ? walkCycle : 0;
+    let time = this.time.now;
+    
+    // 1. 呼吸モーション（止まっている時だけふわふわさせる）
+    let idleBounce = !isMoving ? Math.sin(time / 400) * 2 : 0;
+    
+    // 2. 歩行モーション
+    let walkCycle = Math.sin(time / 100) * 8;
+    let bounceY = (isMoving && player.body.touching.down) ? walkCycle : idleBounce;
+    
+    // 3. 傾き
+    let targetAngle = isMoving ? player.body.velocity.x / 20 : 0;
+    player.setAngle(targetAngle);
+
     let side = player.flipX ? -1 : 1; 
 
-    // 1. 頭 (揺れを0.1倍まで抑えてほぼ固定)
-    head.setPosition(player.x, player.y - 30 + (bounceY * 0.1));
+    // 頭：胴体に完全に追従し、角度も同期
+    head.setPosition(player.x, player.y - 32 + bounceY);
+    head.setAngle(player.angle);
     head.setFlipX(player.flipX);
 
-    // 2. 左手 (体から少し離すため 25 -> 40 に調整)
+    // 左手
     leftHand.setPosition(player.x - (40 * side), player.y + 10 + bounceY);
+    leftHand.setAngle(player.angle);
     leftHand.setFlipX(player.flipX);
 
-    // 3. 右手と剣
+    // 右手と剣
     if (!isAttacking) {
-        // 通常時 (体から少し離すため 25 -> 40 に調整)
         rightHand.setPosition(player.x + (40 * side), player.y + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.setAngle(0);
+        sword.setAngle(player.angle);
         sword.setFlipX(player.flipX);
     } else {
         let swingAngle, offsetX, offsetY;
@@ -167,13 +174,11 @@ function update() {
             offsetY = -10 + (p * 40);
         }
         
-        rightHand.setPosition(player.x + (offsetX * side), player.y + offsetY);
+        rightHand.setPosition(player.x + (offsetX * side), player.y + offsetY + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.setAngle(swingAngle * side);
+        sword.setAngle((swingAngle * side) + player.angle);
         sword.setFlipX(player.flipX);
     }
-
-    player.angle = isMoving ? player.body.velocity.x / 20 : 0;
 }
 </script>
 </body>
