@@ -127,34 +127,25 @@ function update() {
     }
     if (player.body.touching.down) jumpCount = 0;
 
-    // --- モーション計算 ---
     let isMoving = Math.abs(player.body.velocity.x) > 20;
     let time = this.time.now;
-    
-    // 1. 呼吸モーション（止まっている時だけふわふわさせる）
     let idleBounce = !isMoving ? Math.sin(time / 400) * 2 : 0;
-    
-    // 2. 歩行モーション
     let walkCycle = Math.sin(time / 100) * 8;
     let bounceY = (isMoving && player.body.touching.down) ? walkCycle : idleBounce;
-    
-    // 3. 傾き
     let targetAngle = isMoving ? player.body.velocity.x / 20 : 0;
     player.setAngle(targetAngle);
-
     let side = player.flipX ? -1 : 1; 
 
-    // 頭：胴体に完全に追従し、角度も同期
-    head.setPosition(player.x, player.y - 32 + bounceY);
+    // 頭：常にプレイヤー本体（胴体）の中心に完全固定。角度のみプレイヤー本体に合わせる。
+    head.setPosition(player.x, player.y - 32 + idleBounce); // 待機時の揺れのみ頭に反映
     head.setAngle(player.angle);
     head.setFlipX(player.flipX);
 
-    // 左手
+    // 手・剣の更新（こちらは bounceY を含める）
     leftHand.setPosition(player.x - (40 * side), player.y + 10 + bounceY);
     leftHand.setAngle(player.angle);
     leftHand.setFlipX(player.flipX);
 
-    // 右手と剣
     if (!isAttacking) {
         rightHand.setPosition(player.x + (40 * side), player.y + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
