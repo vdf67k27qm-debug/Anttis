@@ -35,7 +35,6 @@ let attackDir = { x: 1, y: 0 };
 let attackProgress = 0;
 
 let wasOnGround = true;
-let landingTimer = 0;
 
 let joyInput = { x: 0, y: 0 };
 let atkJoyInput = { x: 0, y: 0 };
@@ -73,8 +72,10 @@ function create() {
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(3500); 
     playerMain.body.setMaxVelocity(400, 1200);
-    playerMain.body.setSize(60, 90);
-    playerMain.body.setOffset(-30, -45);
+    
+    // 【調整】判定サイズを少し縮小し、オフセットを調整して「めり込み」感を物理的に解消
+    playerMain.body.setSize(50, 85);
+    playerMain.body.setOffset(-25, -42);
 
     leftHand = this.add.sprite(0, 0, 'hand').setDepth(10);
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12);
@@ -185,31 +186,26 @@ function update() {
     let isOnGround = playerMain.body.touching.down;
     let side = playerMain.scaleX;
 
-    if (isOnGround && !wasOnGround) landingTimer = 10;
     wasOnGround = isOnGround;
 
     let totalBounceY = 0;
     let leanAngle = 0;
 
-    // 【修正】攻撃中（isAttacking）であっても速度があれば体を傾けるように変更
     if (isMoving) {
         leanAngle = (playerMain.body.velocity.x / 400) * 12;
     }
 
+    // 【修正】landingTimer を削除し、着地時の不自然なめり込み（totalBounceY = 10）をカット
     if (!isOnGround) {
-        totalBounceY = -4; 
-    } else if (landingTimer > 0) {
-        totalBounceY = 10; 
-        landingTimer--;
+        totalBounceY = -4; // 空中での浮遊感
     } else if (isMoving) {
-        totalBounceY = Math.sin(time / 100) * 8; 
+        totalBounceY = Math.sin(time / 100) * 8; // 歩行揺れ
     } else {
-        totalBounceY = Math.sin(time / 350) * 2; 
+        totalBounceY = Math.sin(time / 350) * 2; // 待機呼吸
     }
     
     body.y = 8 + totalBounceY;
     head.y = -24 + totalBounceY;
-    // 【修正】攻撃中かどうかにかかわらず leanAngle を適用
     playerMain.setAngle(leanAngle);
 
     if (isOnGround) jumpCount = 0;
@@ -217,7 +213,6 @@ function update() {
     let px = playerMain.x, py = playerMain.y;
     leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
     leftHand.setScale(side, 1);
-    // 体の傾き（playerMain.angle）に合わせて手の位置も回転させる
     leftHand.setAngle(playerMain.angle);
 
     if (!isAttacking) {
@@ -227,7 +222,6 @@ function update() {
         sword.setAngle(playerMain.angle);
         sword.setScale(side, 1.3);
     } else {
-        // 攻撃時は右手の基本角度を0にするが、追従位置は傾いた体（playerMain）に依存
         rightHand.setAngle(0); 
         if (attackType === 'stab') {
             let p = (attackProgress * 2) % 1; 
