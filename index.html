@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Pro Controls</title>
+    <title>Scribble Battle - Rabbit Knight</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -27,70 +27,63 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-let player, leftHand, rightHand, sword, platforms;
+let player, head, leftHand, rightHand, sword, platforms;
 let jumpCount = 0;
 let isAttacking = false;
 let attackProgress = 0;
-
-// 入力状態管理
 let joyInput = { x: 0, y: 0, active: false };
 
 function preload() {
-    this.load.image('body', 'character_roundRed.png');
-    this.load.image('hand', 'character_handRed.png');
+    // 素材名の変更に対応
+    this.load.image('head', 'rabbit_head.png');
+    this.load.image('body', 'rabbit_body.png');
+    this.load.image('hand', 'rabbit_hand.png');
+    this.load.image('sword', 'sword.png');
     this.load.image('tile', 'tile_top.png');
-    this.load.image('sword', 'item_sword.png');
 }
 
 function create() {
     this.input.addPointer(3);
 
-    // 【ステージ】
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 13; i++) {
         platforms.create(32 + (i * 64), 568, 'tile');
     }
-    // すり抜け可能な足場として設定
-    const p1 = platforms.create(200, 350, 'tile');
-    const p2 = platforms.create(600, 350, 'tile');
+    platforms.create(200, 350, 'tile');
+    platforms.create(600, 350, 'tile');
 
+    // 胴体を物理ベースに
     player = this.physics.add.sprite(400, 400, 'body');
     player.setCollideWorldBounds(true);
     player.setDragX(3500); 
     player.setMaxVelocity(400, 1200); 
 
+    // 頭・手・剣はスプライトとして作成
+    head = this.add.sprite(0, 0, 'head');
     leftHand = this.add.sprite(0, 0, 'hand');
     rightHand = this.add.sprite(0, 0, 'hand');
-    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.8);
+    // 剣の重心を根元に
+    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9);
 
-    this.physics.add.collider(player, platforms, null, (obj1, obj2) => {
-        // 下入力がある間は足場（タイル）との衝突を無視して「降りる」
-        if (joyInput.y > 0.5 && obj2.y > obj1.y) {
-            return false;
-        }
+    this.physics.add.collider(player, platforms, null, (p, tile) => {
+        if (joyInput.y > 0.5 && tile.y > p.y) return false;
         return true;
     });
 
-    // 【UI: 扇形レイアウトとジョイスティック】
+    // UI作成 (以前の扇形レイアウトを維持)
     const uiY = 480;
-    
-    // 左手：ジョイスティック
     const joyBase = this.add.circle(120, uiY, 60, 0x000000, 0.1);
     const joyStick = this.add.circle(120, uiY, 30, 0x000000, 0.2);
 
     this.input.on('pointermove', (pointer) => {
         if (pointer.x < 400 && pointer.isDown) {
             const dist = Phaser.Math.Distance.Between(joyBase.x, joyBase.y, pointer.x, pointer.y);
-            const maxDist = 60;
             const angle = Phaser.Math.Angle.Between(joyBase.x, joyBase.y, pointer.x, pointer.y);
-            
-            const limitedDist = Math.min(dist, maxDist);
+            const limitedDist = Math.min(dist, 60);
             joyStick.x = joyBase.x + Math.cos(angle) * limitedDist;
             joyStick.y = joyBase.y + Math.sin(angle) * limitedDist;
-
-            joyInput.x = Math.cos(angle) * (limitedDist / maxDist);
-            joyInput.y = Math.sin(angle) * (limitedDist / maxDist);
-            joyInput.active = true;
+            joyInput.x = Math.cos(angle) * (limitedDist / 60);
+            joyInput.y = Math.sin(angle) * (limitedDist / 60);
         }
     });
 
@@ -101,26 +94,18 @@ function create() {
         }
     });
 
-    // 右手：扇形ボタン
     const btnJ = this.add.circle(620, uiY - 40, 55, 0x0000ff, 0.2).setInteractive();
-    this.add.text(620, uiY - 40, 'JUMP', {fontSize:'20px', fontWeight:'bold'}).setOrigin(0.5);
+    this.add.text(620, uiY - 40, 'JUMP', {fontSize:'20px', color:'#000'}).setOrigin(0.5);
 
     const btnA = this.add.circle(710, uiY + 40, 55, 0xff0000, 0.3).setInteractive();
-    this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', fontWeight:'bold'}).setOrigin(0.5);
+    this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', color:'#000'}).setOrigin(0.5);
 
     btnJ.on('pointerdown', () => {
-        if (player.body.touching.down) {
-            jumpCount = 1;
-            player.setVelocityY(-950);
-        } else if (jumpCount < 2) {
-            jumpCount++;
-            player.setVelocityY(-850);
-        }
+        if (player.body.touching.down) { jumpCount = 1; player.setVelocityY(-950); }
+        else if (jumpCount < 2) { jumpCount++; player.setVelocityY(-850); }
     });
 
-    btnA.on('pointerdown', () => {
-        if (!isAttacking) startAttack(this);
-    });
+    btnA.on('pointerdown', () => { if (!isAttacking) startAttack(this); });
 
     this.cursors = this.input.keyboard.createCursorKeys();
 }
@@ -131,7 +116,7 @@ function startAttack(scene) {
     scene.tweens.add({
         targets: { val: 0 },
         val: 1,
-        duration: 300,
+        duration: 250,
         ease: 'Cubic.easeOut',
         onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; attackProgress = 0; }
@@ -139,48 +124,62 @@ function startAttack(scene) {
 }
 
 function update() {
-    // スティック入力による移動
-    let moveX = joyInput.x;
-    if (this.cursors.left.isDown) moveX = -1;
-    if (this.cursors.right.isDown) moveX = 1;
-
+    // 移動処理
+    let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     if (Math.abs(moveX) > 0.2) {
         player.setAccelerationX(moveX * 4000);
         player.setFlipX(moveX < 0);
     } else {
         player.setAccelerationX(0);
     }
-
     if (player.body.touching.down) jumpCount = 0;
 
-    // --- アニメーション ---
-    let walkCycle = Math.sin(this.time.now / 80) * 5;
+    // アニメーション計算
+    let walkCycle = Math.sin(this.time.now / 100) * 8;
     let isMoving = Math.abs(player.body.velocity.x) > 20;
-    let groundY = (isMoving && player.body.touching.down) ? walkCycle : 0;
-    let side = player.flipX ? 1 : -1;
+    let bounceY = (isMoving && player.body.touching.down) ? walkCycle : 0;
+    let side = player.flipX ? -1 : 1; // 向き補正
 
-    leftHand.setPosition(player.x + (32 * side), player.y + 12 + groundY);
+    // 各パーツの位置同期
+    // 1. 頭 (胴体より少し遅れて揺れる)
+    head.setPosition(player.x, player.y - 30 + (bounceY * 0.5));
+    head.setFlipX(player.flipX);
 
+    // 2. 左手 (常に胴体の後ろ側)
+    leftHand.setPosition(player.x - (25 * side), player.y + 10 + bounceY);
+    leftHand.setFlipX(player.flipX);
+
+    // 3. 右手と剣 (通常時 or 攻撃時)
     if (!isAttacking) {
-        rightHand.setPosition(player.x - (32 * side), player.y + 12 + groundY);
+        rightHand.setPosition(player.x + (25 * side), player.y + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.angle = 0;
+        sword.setAngle(0);
         sword.setFlipX(player.flipX);
     } else {
-        let swingAngle, swingX, swingY;
+        // 切り下ろしアクションの計算
+        let swingAngle, offsetX, offsetY;
         if (attackProgress < 0.2) {
+            // 振り上げ（タメ）
             let p = attackProgress / 0.2;
-            swingAngle = p * -45; swingX = -32 - (p * 10); swingY = 12 + (p * 10);
+            swingAngle = p * -60; // 斜め後ろ上へ
+            offsetX = 25 - (p * 10);
+            offsetY = 10 - (p * 20);
         } else {
+            // 振り下ろし
             let p = (attackProgress - 0.2) / 0.8;
-            swingAngle = -45 + (p * 200); swingX = -42 + (p * 90); swingY = 22 + (p * 10);
+            swingAngle = -60 + (p * 180); // 前方斜め下へ
+            offsetX = 15 + (p * 50);
+            offsetY = -10 + (p * 40);
         }
-        rightHand.setPosition(player.x + (swingX * side * -1), player.y + swingY);
+        
+        rightHand.setPosition(player.x + (offsetX * side), player.y + offsetY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.angle = swingAngle * side;
+        sword.setAngle(swingAngle * side);
+        sword.setFlipX(player.flipX);
     }
-    
-    player.angle = isMoving ? player.body.velocity.x / 15 : 0;
+
+    // 胴体のわずかな傾き
+    player.angle = isMoving ? player.body.velocity.x / 20 : 0;
 }
 </script>
 </body>
