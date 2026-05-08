@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Fixed Controls</title>
+    <title>Scribble Battle - Final Adjustments</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -73,25 +73,19 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
-    this.physics.add.collider(playerMain, platforms, null, (p, tile) => {
-        if (joyInput.y > 0.5 && tile.y > p.y) return false;
-        return true;
-    });
+    // 【修正】地面すり抜け機能を削除（単純なコライダーに）
+    this.physics.add.collider(playerMain, platforms);
 
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
-    // --- UI（クリック判定を確実にするため setupUI 内を修正） ---
     const setupUI = () => {
         const uiY = 480;
-        
-        // ジョイスティック
         const joyBase = this.add.circle(120, uiY, 60, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
         const joyStick = this.add.circle(120, uiY, 30, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointermove', (pointer) => {
-            // pointer.position を使うことでカメラ移動の影響を無視
             if (pointer.x < 400 && pointer.isDown) {
                 const dist = Phaser.Math.Distance.Between(120, uiY, pointer.x, pointer.y);
                 const angle = Phaser.Math.Angle.Between(120, uiY, pointer.x, pointer.y);
@@ -110,14 +104,12 @@ function create() {
             }
         });
 
-        // ボタンの作成（コンテナに入れず個別に配置し、ScrollFactorを0にする）
         const btnJ = this.add.circle(620, uiY - 40, 55, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
         this.add.text(620, uiY - 40, 'JUMP', {fontSize:'20px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         const btnA = this.add.circle(710, uiY + 40, 55, 0xff0000, 0.3).setInteractive().setScrollFactor(0).setDepth(100);
         this.add.text(710, uiY + 40, 'ATK', {fontSize:'20px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
-        // ボタンイベント
         btnJ.on('pointerdown', () => {
             if (playerMain.body.touching.down) {
                 jumpCount = 1;
@@ -143,7 +135,7 @@ function startAttack(scene) {
     scene.tweens.add({
         targets: { val: 0 },
         val: 1,
-        duration: 250,
+        duration: 200, // 少し速くして鋭さを出しました
         ease: 'Cubic.easeOut',
         onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; attackProgress = 0; }
@@ -166,7 +158,6 @@ function update() {
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let bounceY = isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 400) * 2;
     
-    // パーツの相対位置のみ更新
     body.y = bounceY;
     head.y = -32 + bounceY;
     playerMain.setAngle(isMoving ? playerMain.body.velocity.x / 20 : 0);
@@ -183,24 +174,27 @@ function update() {
         rightHand.setPosition(px + (40 * side), py + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle(playerMain.angle);
-        sword.setScale(side, 1);
+        // 【修正】剣を縦に伸ばす (1 -> 1.3)
+        sword.setScale(side, 1.3);
     } else {
         let swingAngle, offsetX, offsetY;
         if (attackProgress < 0.2) {
             let p = attackProgress / 0.2;
-            swingAngle = p * -60; 
-            offsetX = 40 - (p * 15);
-            offsetY = 10 - (p * 20);
+            swingAngle = p * -80; // 振りかぶりを大きく
+            offsetX = 40 - (p * 20);
+            offsetY = 10 - (p * 30);
         } else {
             let p = (attackProgress - 0.2) / 0.8;
-            swingAngle = -60 + (p * 180); 
-            offsetX = 25 + (p * 60);
-            offsetY = -10 + (p * 40);
+            // 【修正】振り下ろし角度を 210° まで拡大（斜め下までしっかり下りる）
+            swingAngle = -80 + (p * 290); 
+            offsetX = 20 + (p * 65);
+            offsetY = -20 + (p * 60);
         }
         rightHand.setPosition(px + (offsetX * side), py + offsetY + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle((swingAngle * side) + playerMain.angle);
-        sword.setScale(side, 1);
+        // 【修正】攻撃中も剣を伸ばす
+        sword.setScale(side, 1.3);
     }
 }
 </script>
