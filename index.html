@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Final Edition</title>
+    <title>Scribble Battle - Senior Dev Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -34,17 +34,16 @@ let attackType = 'slash';
 let attackDir = { x: 1, y: 0 };
 let attackProgress = 0;
 
-// アニメーション制御用
 let wasOnGround = true;
 let landingTimer = 0;
 
-// 入力管理用
 let joyInput = { x: 0, y: 0 };
 let atkJoyInput = { x: 0, y: 0 };
 let movePointerId = null;
 let atkPointerId = null;
 
 function preload() {
+    // iPadからのGitHub Pages公開を想定し、相対パスで記述
     this.load.image('head', 'rabbit_head.png');
     this.load.image('body', 'rabbit_body.png');
     this.load.image('hand', 'rabbit_hand.png');
@@ -66,8 +65,6 @@ function create() {
     platforms.create(1200, 550, 'tile');
 
     playerMain = this.add.container(400, 600);
-    
-    // パーツの初期位置を固定（一体化のため）
     body = this.add.sprite(0, 8, 'body');
     head = this.add.sprite(0, -24, 'head');
     playerMain.add([body, head]);
@@ -77,12 +74,11 @@ function create() {
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(3500); 
     playerMain.body.setMaxVelocity(400, 1200);
-    
     playerMain.body.setSize(60, 90);
     playerMain.body.setOffset(-30, -45);
 
     leftHand = this.add.sprite(0, 0, 'hand').setDepth(10);
-    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.9).setDepth(12);
+    sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12); // 軸を微調整
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
     this.physics.add.collider(playerMain, platforms);
@@ -92,17 +88,13 @@ function create() {
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
     const setupUI = () => {
-        const uiY = 510;
-        const joyX = 110;
-        const atkX = 690;
-        const radius = 45;
+        const uiY = 510, joyX = 110, atkX = 690, radius = 45;
 
+        // UIパーツの描画
         this.add.circle(joyX, uiY, radius, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
         const joyStick = this.add.circle(joyX, uiY, 20, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
-
         this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
         const atkStick = this.add.circle(atkX, uiY, 20, 0xff0000, 0.2).setScrollFactor(0).setDepth(101);
-
         const btnJ = this.add.circle(atkX - 95, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
         this.add.text(atkX - 95, uiY + 10, 'JUMP', {fontSize:'12px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
@@ -175,7 +167,7 @@ function startAttack(scene, type, dir = null) {
     scene.tweens.add({
         targets: { val: 0 },
         val: 1,
-        duration: type === 'stab' ? 300 : 250,
+        duration: type === 'stab' ? 200 : 250, // 突きを少し高速化
         onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; }
     });
@@ -184,15 +176,12 @@ function startAttack(scene, type, dir = null) {
 function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
-    if (!isAttacking) {
-        if (Math.abs(moveX) > 0.2) {
-            playerMain.body.setAccelerationX(moveX * 4000);
-            playerMain.setScale(moveX < 0 ? -1 : 1, 1);
-        } else {
-            playerMain.body.setAccelerationX(0);
-        }
-    } else {
+    // 移動制御
+    if (Math.abs(moveX) > 0.2) {
         playerMain.body.setAccelerationX(moveX * 4000);
+        if (!isAttacking) playerMain.setScale(moveX < 0 ? -1 : 1, 1);
+    } else {
+        playerMain.body.setAccelerationX(0);
     }
     
     let time = this.time.now;
@@ -200,65 +189,63 @@ function update() {
     let isOnGround = playerMain.body.touching.down;
     let side = playerMain.scaleX;
 
-    // 着地検知
     if (isOnGround && !wasOnGround) landingTimer = 10;
     wasOnGround = isOnGround;
 
-    // 統合された上下オフセット
     let totalBounceY = 0;
     let leanAngle = 0;
 
-    // 前傾姿勢の修正ロジック: (速度 * 向き) で常に前傾するように
-    if (isMoving) {
-        leanAngle = (playerMain.body.velocity.x * side / 400) * 12;
+    // 前傾姿勢の計算（修正済み・安定版）
+    if (isMoving && !isAttacking) {
+        // コンテナ全体の回転を利用して進行方向へ傾ける
+        leanAngle = (playerMain.body.velocity.x / 400) * 12;
     }
 
-    // 各状態のモーション設定
+    // 上下アニメーションの統合
     if (!isOnGround) {
-        totalBounceY = -4; // 空中姿勢（少し浮く）
+        totalBounceY = -4; 
     } else if (landingTimer > 0) {
-        totalBounceY = 10; // 接地踏ん張り
+        totalBounceY = 10; 
         landingTimer--;
     } else if (isMoving) {
-        totalBounceY = Math.sin(time / 100) * 8; // 歩行
+        totalBounceY = Math.sin(time / 100) * 8; 
     } else {
-        totalBounceY = Math.sin(time / 350) * 2; // 呼吸
+        totalBounceY = Math.sin(time / 350) * 2; 
     }
     
-    // headとbodyを完全に同期して移動
     body.y = 8 + totalBounceY;
     head.y = -24 + totalBounceY;
-    
-    // 攻撃時以外は前傾姿勢を適用
     playerMain.setAngle(isAttacking ? 0 : leanAngle);
 
-    if (playerMain.body.touching.down) jumpCount = 0;
+    if (isOnGround) jumpCount = 0;
 
     let px = playerMain.x, py = playerMain.y;
 
-    // 手の位置（キャラ全体の角度と同期）
+    // 手と武器の同期
     leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
     leftHand.setScale(side, 1);
     leftHand.setAngle(playerMain.angle);
 
     if (!isAttacking) {
+        // 通常時
         rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
         rightHand.setAngle(playerMain.angle);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle(playerMain.angle);
         sword.setScale(side, 1.3);
     } else {
-        // 攻撃中は手の角度を独立制御
+        // 攻撃時
         rightHand.setAngle(0); 
         if (attackType === 'stab') {
             let p = (attackProgress * 2) % 1; 
-            let thrust = Math.sin(p * Math.PI) * 70;
+            let thrust = Math.sin(p * Math.PI) * 75;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
         } else {
             let p = attackProgress;
             let startAng, endAng;
+            // 上・中・下段の判定
             if (attackDir.y < -0.4) { startAng = -150; endAng = -30; }
             else if (attackDir.y > 0.4) { startAng = 20; endAng = 160; }
             else { startAng = -60; endAng = 60; }
