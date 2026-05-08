@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Pizza Slice Input</title>
+    <title>Scribble Battle - Final Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
@@ -35,7 +35,6 @@ let attackDir = { x: 1, y: 0 };
 let attackProgress = 0;
 let joyInput = { x: 0, y: 0 };
 let atkJoyInput = { x: 0, y: 0 };
-let isAtkJoyActive = false; // 攻撃ジョイスティックが有効に触られたか
 
 function preload() {
     this.load.image('head', 'rabbit_head.png');
@@ -49,10 +48,14 @@ function create() {
     const scene = this;
     this.input.addPointer(3);
 
+    const worldWidth = 2000;
+    const worldHeight = 800;
+
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 32; i++) platforms.create(32 + (i * 64), 750, 'tile');
     platforms.create(400, 550, 'tile');
     platforms.create(800, 400, 'tile');
+    platforms.create(1200, 550, 'tile');
 
     playerMain = this.add.container(400, 600);
     body = this.add.sprite(0, 0, 'body');
@@ -64,6 +67,7 @@ function create() {
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(3500); 
     playerMain.body.setMaxVelocity(400, 1200);
+    // 物理ボディの最適化
     playerMain.body.setSize(60, 90);
     playerMain.body.setOffset(-30, -45);
 
@@ -72,82 +76,68 @@ function create() {
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
     this.physics.add.collider(playerMain, platforms);
+
+    this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
+    this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
     const setupUI = () => {
         const uiY = 510;
         const joyX = 110;
         const atkX = 690;
-        const radius = 55;
+        const radius = 45;
 
-        // --- 左：移動ジョイスティック ---
+        // 移動ジョイスティック
         this.add.circle(joyX, uiY, radius, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
-        const joyStick = this.add.circle(joyX, uiY, 25, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
+        const joyStick = this.add.circle(joyX, uiY, 20, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
 
-        // --- 右：攻撃ジョイスティック（ピザ切り視覚化） ---
-        const atkBase = this.add.graphics().setScrollFactor(0).setDepth(99);
-        // 上(Yellow), 下(Cyan), 横(Magenta)
-        const drawPizza = () => {
-            atkBase.clear();
-            atkBase.fillStyle(0xffcc00, 0.15); // 上
-            atkBase.slice(atkX, uiY, radius + 10, Phaser.Math.DegToRad(225), Phaser.Math.DegToRad(315), false).fillPath();
-            atkBase.fillStyle(0x00cccc, 0.15); // 下
-            atkBase.slice(atkX, uiY, radius + 10, Phaser.Math.DegToRad(45), Phaser.Math.DegToRad(135), false).fillPath();
-            atkBase.lineStyle(2, 0xff0000, 0.3);
-            atkBase.strokeCircle(atkX, uiY, radius);
-        };
-        drawPizza();
-        
-        const atkStick = this.add.circle(atkX, uiY, 25, 0xff0000, 0.3).setScrollFactor(0).setDepth(101);
-        const btnJ = this.add.circle(atkX - 100, uiY + 15, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
-        this.add.text(atkX - 100, uiY + 15, 'JUMP', {fontSize:'12px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+        // 攻撃ジョイスティック
+        this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
+        const atkStick = this.add.circle(atkX, uiY, 20, 0xff0000, 0.2).setScrollFactor(0).setDepth(101);
 
-        this.input.on('pointerdown', (p) => {
-            if (Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y) < radius) {
-                isAtkJoyActive = true;
-            }
-        });
+        // ジャンプボタン
+        const btnJ = this.add.circle(atkX - 85, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
+        this.add.text(atkX - 85, uiY + 10, 'JUMP', {fontSize:'12px', color:'#000'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointermove', (p) => {
-            // 移動処理
-            if (p.x < 400 && p.isDown) {
+            if (p.x < 300 && p.isDown) {
                 const ang = Phaser.Math.Angle.Between(joyX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(joyX, uiY, p.x, p.y), radius);
                 joyStick.setPosition(joyX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 joyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
-            // 攻撃処理（ピザ切り即時判定）
-            if (isAtkJoyActive && p.isDown && !isAttacking) {
+            if (p.x > 500 && p.isDown) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
-                const d = Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y);
-                const visualD = Math.min(d, radius);
-                atkStick.setPosition(atkX + Math.cos(ang) * visualD, uiY + Math.sin(ang) * visualD);
-                
-                // 半径の60%を超えたら即座にフリック攻撃
-                if (d > radius * 0.6) {
-                    let dirX = Math.cos(ang);
-                    let dirY = Math.sin(ang);
-                    startAttack(scene, 'slash', {x: dirX, y: dirY});
-                    isAtkJoyActive = false; // 離すまで再判定しない
-                }
+                const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
+                atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
+                atkJoyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
         });
 
         this.input.on('pointerup', (p) => {
-            if (p.x < 400) { joyStick.setPosition(joyX, uiY); joyInput = { x: 0, y: 0 }; }
-            if (isAtkJoyActive) {
-                // スティックがあまり動いていなければ突き攻撃
-                if (!isAttacking) startAttack(scene, 'stab');
+            if (p.x < 300) {
+                joyStick.setPosition(joyX, uiY);
+                joyInput = { x: 0, y: 0 };
+            }
+            if (p.x > 500) {
+                if (!isAttacking) {
+                    const d = Phaser.Math.Distance.Between(atkX, uiY, atkStick.x, atkStick.y);
+                    if (d > 20) startAttack(scene, 'slash', {x: atkJoyInput.x, y: atkJoyInput.y});
+                    else startAttack(scene, 'stab');
+                }
                 atkStick.setPosition(atkX, uiY);
-                isAtkJoyActive = false;
-            } else if (!p.isDown) {
-                atkStick.setPosition(atkX, uiY);
+                atkJoyInput = { x: 0, y: 0 };
             }
         });
 
         btnJ.on('pointerdown', () => {
-            if (playerMain.body.touching.down) { jumpCount = 1; playerMain.body.setVelocityY(-1000); }
-            else if (jumpCount < 2) { jumpCount++; playerMain.body.setVelocityY(-900); }
+            if (playerMain.body.touching.down) {
+                jumpCount = 1;
+                playerMain.body.setVelocityY(-1000);
+            } else if (jumpCount < 2) {
+                jumpCount++;
+                playerMain.body.setVelocityY(-900);
+            }
         });
     };
     setupUI();
@@ -158,77 +148,93 @@ function startAttack(scene, type, dir = null) {
     isAttacking = true;
     attackType = type;
     attackProgress = 0;
+    
     if (dir) {
+        // 攻撃した方向に向きを固定
         if (Math.abs(dir.x) > 0.1) playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
         attackDir = dir;
     } else {
+        // タップ時は現在の向きを維持
         attackDir = { x: playerMain.scaleX, y: 0 };
     }
+
     scene.tweens.add({
-        targets: { val: 0 }, val: 1, duration: type === 'stab' ? 300 : 250,
-        onUpdate: (t) => { attackProgress = t.getValue(); },
+        targets: { val: 0 },
+        val: 1,
+        duration: type === 'stab' ? 350 : 250,
+        ease: 'Cubic.easeOut',
+        onUpdate: (tween) => { attackProgress = tween.getValue(); },
         onComplete: () => { isAttacking = false; }
     });
 }
 
 function update() {
-    let moveX = joyInput.x;
-    let side = playerMain.scaleX;
-
-    // 自然な傾き
-    let targetAngle = 0;
+    let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
+    
+    // 攻撃中以外のみ向きを変えられるように制限
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * 4000);
             playerMain.setScale(moveX < 0 ? -1 : 1, 1);
-            targetAngle = moveX * 12;
         } else {
             playerMain.body.setAccelerationX(0);
         }
     } else {
+        // 攻撃中は加速のみ（向きはstartAttackで決めた方向に固定）
         playerMain.body.setAccelerationX(moveX * 4000);
     }
-    playerMain.angle = Phaser.Math.Linear(playerMain.angle, targetAngle, 0.1);
-
+    
     if (playerMain.body.touching.down) jumpCount = 0;
 
-    let bounceY = (Math.abs(playerMain.body.velocity.x) > 20) ? Math.sin(this.time.now / 100) * 8 : 0;
+    let time = this.time.now;
+    let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
+    let bounceY = isMoving ? Math.sin(time / 100) * 8 : 0;
+    
     body.y = bounceY;
     head.y = -32 + bounceY;
 
+    let side = playerMain.scaleX;
     let px = playerMain.x, py = playerMain.y;
+
     leftHand.setPosition(px - (40 * side), py + 10 + bounceY);
+    leftHand.setScale(side, 1);
 
     if (!isAttacking) {
         rightHand.setPosition(px + (40 * side), py + 10 + bounceY);
         sword.setPosition(rightHand.x, rightHand.y);
-        sword.setAngle(playerMain.angle);
+        sword.setAngle(0);
         sword.setScale(side, 1.3);
     } else {
         if (attackType === 'stab') {
+            // 2連突き
             let p = (attackProgress * 2) % 1; 
             let thrust = Math.sin(p * Math.PI) * 70;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 10 + bounceY);
+            sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
         } else {
+            // 方向別振りかざし
             let p = attackProgress;
             let startAng, endAng;
-            // 扇形判定（ピザ切り）
+            
             if (attackDir.y < -0.4) { // 上
-                startAng = 180; endAng = -30;
+                startAng = 160; endAng = -20;
             } else if (attackDir.y > 0.4) { // 下
-                startAng = 0; endAng = 210;
+                startAng = 20; endAng = 200;
             } else { // 横
-                startAng = -60; endAng = 240;
+                startAng = -60; endAng = 220;
             }
-            let curAng = startAng + (p * (endAng - startAng));
-            let rx = Math.cos(Phaser.Math.DegToRad(curAng)) * 65;
-            let ry = Math.sin(Phaser.Math.DegToRad(curAng)) * 65;
-            rightHand.setPosition(px + (rx * side), py + ry + bounceY);
-            sword.setAngle((curAng + 90) * side);
+            
+            let currentAng = startAng + (p * (endAng - startAng));
+            let radius = 60;
+            let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * radius;
+            let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * radius;
+            
+            rightHand.setPosition(px + (sweepX * side), py + sweepY + bounceY);
+            sword.setPosition(rightHand.x, rightHand.y);
+            sword.setAngle((currentAng + 90) * side);
         }
-        sword.setPosition(rightHand.x, rightHand.y);
-        sword.setScale(side, 1.7);
+        sword.setScale(side, 1.6);
     }
 }
 </script>
