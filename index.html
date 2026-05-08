@@ -34,7 +34,7 @@ let attackType = 'slash';
 let attackDir = { x: 1, y: 0 };
 let attackProgress = 0;
 
-// アニメーション制御用フラグ
+// アニメーション制御用
 let wasOnGround = true;
 let landingTimer = 0;
 
@@ -67,6 +67,7 @@ function create() {
 
     playerMain = this.add.container(400, 600);
     
+    // パーツの初期位置を固定（一体化のため）
     body = this.add.sprite(0, 8, 'body');
     head = this.add.sprite(0, -24, 'head');
     playerMain.add([body, head]);
@@ -197,97 +198,77 @@ function update() {
     let time = this.time.now;
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let isOnGround = playerMain.body.touching.down;
-    
-    // 着地瞬間の検知
-    if (isOnGround && !wasOnGround) {
-        landingTimer = 10; // 10フレーム踏ん張る
-    }
+    let side = playerMain.scaleX;
+
+    // 着地検知
+    if (isOnGround && !wasOnGround) landingTimer = 10;
     wasOnGround = isOnGround;
 
-    let bounceY = 0;
-    let headOffset = 0;
+    // 統合された上下オフセット
+    let totalBounceY = 0;
     let leanAngle = 0;
 
-    // 前傾姿勢の計算
+    // 前傾姿勢の修正ロジック: (速度 * 向き) で常に前傾するように
     if (isMoving) {
-        // 進行方向に傾く (最大10度程度)
-        leanAngle = (playerMain.body.velocity.x / 400) * 10 * playerMain.scaleX;
+        leanAngle = (playerMain.body.velocity.x * side / 400) * 12;
     }
 
+    // 各状態のモーション設定
     if (!isOnGround) {
-        // 空中姿勢
-        bounceY = -4;
-        // 上昇中は伸び、下降中は少し縮む
-        headOffset = playerMain.body.velocity.y < 0 ? -6 : 2;
+        totalBounceY = -4; // 空中姿勢（少し浮く）
     } else if (landingTimer > 0) {
-        // 着地踏ん張り
-        bounceY = 10; // グッと沈み込む
-        headOffset = 4;
+        totalBounceY = 10; // 接地踏ん張り
         landingTimer--;
     } else if (isMoving) {
-        // 歩行時
-        bounceY = Math.sin(time / 100) * 8;
-        headOffset = bounceY;
+        totalBounceY = Math.sin(time / 100) * 8; // 歩行
     } else {
-        // 静止時
-        let breathe = Math.sin(time / 350);
-        bounceY = breathe * 2; 
-        headOffset = breathe * 4; 
+        totalBounceY = Math.sin(time / 350) * 2; // 呼吸
     }
     
-    // スプライトに反映
-    body.y = 8 + bounceY;
-    head.y = -24 + headOffset;
+    // headとbodyを完全に同期して移動
+    body.y = 8 + totalBounceY;
+    head.y = -24 + totalBounceY;
     
-    // 前傾姿勢を適用 (攻撃中は無効化して見栄えを保つ)
-    if (!isAttacking) {
-        playerMain.setAngle(leanAngle);
-    } else {
-        playerMain.setAngle(0);
-    }
+    // 攻撃時以外は前傾姿勢を適用
+    playerMain.setAngle(isAttacking ? 0 : leanAngle);
 
     if (playerMain.body.touching.down) jumpCount = 0;
 
-    let side = playerMain.scaleX;
     let px = playerMain.x, py = playerMain.y;
 
-    // 手の位置
-    leftHand.setPosition(px - (40 * side), py + 18 + bounceY);
+    // 手の位置（キャラ全体の角度と同期）
+    leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
     leftHand.setScale(side, 1);
     leftHand.setAngle(playerMain.angle);
 
     if (!isAttacking) {
-        rightHand.setPosition(px + (40 * side), py + 18 + bounceY);
+        rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
         rightHand.setAngle(playerMain.angle);
         sword.setPosition(rightHand.x, rightHand.y);
         sword.setAngle(playerMain.angle);
         sword.setScale(side, 1.3);
     } else {
-        rightHand.setAngle(0); // 攻撃時はコンテナの角度を無視して制御
+        // 攻撃中は手の角度を独立制御
+        rightHand.setAngle(0); 
         if (attackType === 'stab') {
             let p = (attackProgress * 2) % 1; 
             let thrust = Math.sin(p * Math.PI) * 70;
-            rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + bounceY);
+            rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
         } else {
             let p = attackProgress;
             let startAng, endAng;
-            
-            if (attackDir.y < -0.4) { 
-                startAng = -150; endAng = -30;
-            } else if (attackDir.y > 0.4) { 
-                startAng = 20; endAng = 160;
-            } else { 
-                startAng = -60; endAng = 60;
-            }
+            if (attackDir.y < -0.4) { startAng = -150; endAng = -30; }
+            else if (attackDir.y > 0.4) { startAng = 20; endAng = 160; }
+            else { startAng = -60; endAng = 60; }
             
             let currentAng = startAng + (p * (endAng - startAng));
             let radius = 65;
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * radius;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * radius;
             
-            rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + bounceY);
+            rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle((currentAng + 90) * side);
         }
