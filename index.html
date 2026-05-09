@@ -40,7 +40,7 @@ const config = {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     physics: {
         default: 'arcade',
-        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 32 }
+        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 64 } // めり込み防止強化
     },
     scene: { preload: preload, create: create, update: update }
 };
@@ -101,16 +101,22 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
+    // 強攻撃時の衝突判定ロジック（地上発動バグ対応）
     this.physics.add.collider(playerMain, platforms, (p, platform) => {
-        if (isAttacking && attackType.includes('super')) {
-            const pBody = playerMain.body;
-            if (attackType === 'super_meteor' && pBody.touching.down) {
-                pBody.setVelocityY(-ATTACK_RECOIL * 0.5);
-            } else if (attackType === 'super_dash') {
-                pBody.setVelocityX(-pBody.velocity.x * 0.2);
-            } else if (attackType === 'super_up' && pBody.touching.up) {
-                pBody.setVelocityY(ATTACK_RECOIL);
-            }
+        if (!isAttacking) return;
+        
+        const b = playerMain.body;
+        if (attackType === 'super_dash' && (b.blocked.left || b.blocked.right)) {
+            // 壁にぶつかった時のみ停止
+            b.setVelocityX(-b.velocity.x * 0.2);
+            stopAttack();
+        } else if (attackType === 'super_up' && b.blocked.up) {
+            // 天井にぶつかった時のみ停止
+            b.setVelocityY(ATTACK_RECOIL);
+            stopAttack();
+        } else if (attackType === 'super_meteor' && b.blocked.down) {
+            // 地面にぶつかった時のみ停止
+            b.setVelocityY(-ATTACK_RECOIL * 0.5);
             stopAttack();
         }
     });
@@ -211,10 +217,14 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
+    // 向きの確定: 純粋な垂直入力時は現在の向きを維持
     if (dir && Math.abs(dir.x) > 0.1) {
         playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
     }
+    
     attackDir = dir ? { ...dir } : { x: playerMain.scaleX, y: 0 };
+    // attackDir.x が 0 の場合、描画計算用に現在の向きを保持
+    if (Math.abs(attackDir.x) < 0.1) attackDir.x = 0;
 
     let duration = 150;
     if (type === 'stab') duration = 250;
@@ -238,7 +248,7 @@ function startAttack(scene, type, dir = null) {
         onUpdate: (tween) => { 
             attackProgress = tween.getValue();
             if (type === 'super_dash') {
-                playerMain.body.setVelocityX(attackDir.x * SUPER_DASH_SPEED);
+                playerMain.body.setVelocityX(playerMain.scaleX * SUPER_DASH_SPEED);
                 playerMain.body.setVelocityY(0);
             } else if (type === 'super_up') {
                 playerMain.body.setVelocityY(SUPER_UP_VELOCITY);
@@ -262,9 +272,8 @@ function update() {
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-    const isSpecialMovement = (attackType === 'super_dash' || attackType === 'super_up' || attackType === 'super_meteor');
-
-    // 移動制御
+    
+    // 攻撃中は向きの自動リセットを防ぐ
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
@@ -273,7 +282,7 @@ function update() {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        // 強攻撃中は入力を完全に無視、弱攻撃中は「慣性のみ」許容し加速は停止
+        // 攻撃中は手動加速のみ停止（慣性は維持される）
         playerMain.body.setAccelerationX(0);
     }
     
@@ -304,12 +313,12 @@ function update() {
         rightHand.setAngle(0); 
         if (attackType === 'stab' || attackType === 'super_dash') {
             let p = (attackType === 'super_dash') ? 1 : (attackProgress * 2) % 1;
-            // 乖離を修正 (100 -> 60)
+            // 横強攻撃時の乖離を修正 (thrust: 60)
             let thrust = (attackType === 'super_dash') ? 60 : Math.sin(p * Math.PI) * 75;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
-            // スケールを修正 (1.8 -> 1.5)
+            // スケールを最適化
             sword.setScale(side, attackType === 'super_dash' ? 1.5 : 2.0);
         } else if (attackType === 'super_up') {
             rightHand.setPosition(px, py - 80 + totalBounceY);
@@ -322,7 +331,9 @@ function update() {
             sword.setAngle(180);
             sword.setScale(side, 1.8);
         } else {
+            // 弱攻撃（slash）
             let p = attackProgress;
+            // attackDir.y に基づいた切り払い角度の決定
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
             let endAng = (attackDir.y < -0.4) ? -30 : (attackDir.y > 0.4 ? 160 : 60);
             let currentAng = startAng + (p * (endAng - startAng));
