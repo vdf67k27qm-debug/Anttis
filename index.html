@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Ultra Stability Edition</title>
+    <title>Scribble Battle - Advanced Motion Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -31,6 +31,7 @@ const SUPER_DASH_DURATION = 400;
 const SUPER_UP_VELOCITY = -1200;
 const METEOR_SPEED = 1300;
 const ATTACK_RECOIL = 200; 
+const DUST_COLOR = 0xd2b48c; // 砂埃の色（薄茶色）
 // -----------------------
 
 const config = {
@@ -54,7 +55,7 @@ let isAttacking = false;
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
 let attackLockedSide = 1; 
-let facingSide = 1; // 【新設】ロジック上の向きを管理する変数
+let facingSide = 1; 
 let attackProgress = 0;
 let currentTween = null;
 
@@ -65,6 +66,9 @@ let joyInput = { x: 0, y: 0 };
 let atkJoyInput = { x: 0, y: 0 };
 let movePointerId = null;
 let atkPointerId = null;
+
+let isJumpPressed = false; // ジャンプ高度調整用
+let dustGroup; // 砂埃エフェクト用グループ
 
 function preload() {
     this.load.image('head', 'rabbit_head.png');
@@ -80,6 +84,8 @@ function create() {
 
     const worldWidth = 2000;
     const worldHeight = 800;
+
+    dustGroup = this.add.group();
 
     platforms = this.physics.add.staticGroup();
     for (let i = 0; i < 32; i++) platforms.create(32 + (i * 64), 750, 'tile');
@@ -114,7 +120,8 @@ function create() {
             b.setVelocityY(ATTACK_RECOIL);
             stopAttack();
         } else if (attackType === 'super_meteor' && b.blocked.down) {
-            b.setVelocityY(-ATTACK_RECOIL * 0.5);
+            // 地面衝突時に反動で少し浮く演出
+            b.setVelocityY(-450); 
             stopAttack();
         }
     });
@@ -187,6 +194,7 @@ function create() {
         this.input.on('pointercancel', releasePointer);
 
         btnJ.on('pointerdown', () => {
+            isJumpPressed = true;
             if (playerMain.body.touching.down) {
                 jumpCount = 1;
                 playerMain.body.setVelocityY(-1000);
@@ -195,9 +203,30 @@ function create() {
                 playerMain.body.setVelocityY(-900);
             }
         });
+        btnJ.on('pointerup', () => {
+            isJumpPressed = false;
+        });
+        btnJ.on('pointerout', () => {
+            isJumpPressed = false;
+        });
     };
     setupUI();
     this.cursors = this.input.keyboard.createCursorKeys();
+}
+
+function createDustEffect(scene, x, y) {
+    const dust = scene.add.circle(x, y + 40, Phaser.Math.Between(4, 10), DUST_COLOR, 0.6);
+    dust.setDepth(5);
+    dustGroup.add(dust);
+    scene.tweens.add({
+        targets: dust,
+        x: x + Phaser.Math.Between(-20, 20),
+        y: y + 20 + Phaser.Math.Between(-5, 5),
+        alpha: 0,
+        scale: 0.2,
+        duration: Phaser.Math.Between(400, 700),
+        onComplete: () => dust.destroy()
+    });
 }
 
 function stopAttack() {
@@ -206,7 +235,7 @@ function stopAttack() {
     playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600);
     playerMain.body.setDragX(NORMAL_DRAG); 
     if (attackType === 'super_meteor') {
-        playerMain.body.setVelocityY(0);
+        // 反動後の制御を戻すため、ここでは物理的な速度ゼロ化はしない
     }
 }
 
@@ -217,14 +246,11 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
-    // 【ChatGPT修正案の反映】
-    // 現在向いている方向を固定してコピー
     attackLockedSide = facingSide;
 
-    // 横入力が十分に大きい（0.5）場合のみ、その方向へ向きを更新
     if (dir && Math.abs(dir.x) > 0.5) {
         attackLockedSide = dir.x > 0 ? 1 : -1;
-        facingSide = attackLockedSide; // ロジック上の向きも更新
+        facingSide = attackLockedSide;
     }
     
     playerMain.setScale(facingSide, 1);
@@ -267,7 +293,6 @@ function startAttack(scene, type, dir = null) {
                 playerMain.body.setVelocityY(SUPER_UP_VELOCITY);
             } else if (type === 'super_meteor') {
                 playerMain.body.setVelocityY(METEOR_SPEED);
-                playerMain.body.setVelocityX(0);
             }
         },
         onComplete: () => { 
@@ -280,6 +305,11 @@ function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
 
+    // ジャンプ高度調整
+    if (!isJumpPressed && playerMain.body.velocity.y < -100) {
+        playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.85);
+    }
+
     if (atkPointerId !== null && !isAttacking) {
         let elapsed = time - chargeTimer;
         isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
@@ -287,19 +317,34 @@ function update() {
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
+    // 攻撃中の移動制御の変更
     if (!isAttacking) {
         playerMain.body.setDragX(NORMAL_DRAG);
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-            // 【ChatGPT修正案の反映】
             facingSide = moveX < 0 ? -1 : 1;
             playerMain.setScale(facingSide, 1);
+            
+            // 地面移動時の砂埃エフェクト
+            if (isOnGround && time % 5 === 0) {
+                createDustEffect(this, playerMain.x, playerMain.y);
+            }
         } else {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        playerMain.body.setAccelerationX(0);
-        playerMain.setScale(attackLockedSide, 1); // 攻撃開始時に固定した値を維持
+        // 強攻撃上下の最中は左右移動を許可
+        if (attackType === 'super_up' || attackType === 'super_meteor') {
+            playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
+            if (Math.abs(moveX) > 0.2) {
+                facingSide = moveX < 0 ? -1 : 1;
+                attackLockedSide = facingSide; 
+            }
+        } else {
+            playerMain.body.setAccelerationX(0);
+        }
+        
+        playerMain.setScale(attackLockedSide, 1); 
         
         if (isOnGround && attackType !== 'super_dash') {
             playerMain.body.setDragX(NORMAL_DRAG);
@@ -307,7 +352,6 @@ function update() {
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
-    // 描画用のside変数を攻撃中は固定された値にする
     let side = isAttacking ? attackLockedSide : facingSide;
 
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
