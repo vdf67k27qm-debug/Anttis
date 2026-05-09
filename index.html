@@ -29,7 +29,7 @@ const SUPER_DASH_SPEED = 1000;
 const SUPER_DASH_DURATION = 400;
 const SUPER_UP_VELOCITY = -700;
 const METEOR_SPEED = 1300;
-const ATTACK_RECOIL = 200; // 衝突時の反動強度
+const ATTACK_RECOIL = 200; 
 // -----------------------
 
 const config = {
@@ -40,7 +40,7 @@ const config = {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     physics: {
         default: 'arcade',
-        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 32 } // めり込み防止
+        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 32 }
     },
     scene: { preload: preload, create: create, update: update }
 };
@@ -101,20 +101,16 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
-    // 強攻撃時の衝突判定
     this.physics.add.collider(playerMain, platforms, (p, platform) => {
-        if (isAttacking && (attackType.includes('super'))) {
-            // 反動処理
+        if (isAttacking && attackType.includes('super')) {
             const pBody = playerMain.body;
             if (attackType === 'super_meteor' && pBody.touching.down) {
-                pBody.setVelocityY(-ATTACK_RECOIL * 0.5); // 地面なら軽く跳ねる
+                pBody.setVelocityY(-ATTACK_RECOIL * 0.5);
             } else if (attackType === 'super_dash') {
-                pBody.setVelocityX(-pBody.velocity.x * 0.2); // 壁なら反発
+                pBody.setVelocityX(-pBody.velocity.x * 0.2);
             } else if (attackType === 'super_up' && pBody.touching.up) {
                 pBody.setVelocityY(ATTACK_RECOIL);
             }
-            
-            // 強制終了
             stopAttack();
         }
     });
@@ -204,7 +200,6 @@ function stopAttack() {
     isAttacking = false;
     if (currentTween) currentTween.stop();
     playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600);
-    // 速度リセット（めり込み・鈍足防止）
     if (attackType === 'super_meteor') {
         playerMain.body.setVelocityY(0);
     }
@@ -216,11 +211,10 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
-    // 攻撃開始時に向きを確定（dir.xが有効な場合のみ）
     if (dir && Math.abs(dir.x) > 0.1) {
         playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
     }
-    attackDir = dir ? dir : { x: playerMain.scaleX, y: 0 };
+    attackDir = dir ? { ...dir } : { x: playerMain.scaleX, y: 0 };
 
     let duration = 150;
     if (type === 'stab') duration = 250;
@@ -248,7 +242,6 @@ function startAttack(scene, type, dir = null) {
                 playerMain.body.setVelocityY(0);
             } else if (type === 'super_up') {
                 playerMain.body.setVelocityY(SUPER_UP_VELOCITY);
-                playerMain.body.setVelocityX(playerMain.scaleX * 150);
             } else if (type === 'super_meteor') {
                 playerMain.body.setVelocityY(METEOR_SPEED);
                 playerMain.body.setVelocityX(0);
@@ -271,7 +264,7 @@ function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     const isSpecialMovement = (attackType === 'super_dash' || attackType === 'super_up' || attackType === 'super_meteor');
 
-    // 攻撃中は向き変更を禁止（setScaleの上書きを阻止）
+    // 移動制御
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
@@ -280,10 +273,8 @@ function update() {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        // 攻撃中の加速制御
-        if (!isSpecialMovement) {
-            playerMain.body.setAccelerationX(0);
-        }
+        // 強攻撃中は入力を完全に無視、弱攻撃中は「慣性のみ」許容し加速は停止
+        playerMain.body.setAccelerationX(0);
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
@@ -313,11 +304,13 @@ function update() {
         rightHand.setAngle(0); 
         if (attackType === 'stab' || attackType === 'super_dash') {
             let p = (attackType === 'super_dash') ? 1 : (attackProgress * 2) % 1;
-            let thrust = (attackType === 'super_dash') ? 100 : Math.sin(p * Math.PI) * 75;
+            // 乖離を修正 (100 -> 60)
+            let thrust = (attackType === 'super_dash') ? 60 : Math.sin(p * Math.PI) * 75;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
-            sword.setScale(side, attackType === 'super_dash' ? 1.8 : 2.0); // 引き伸ばし率下方修正
+            // スケールを修正 (1.8 -> 1.5)
+            sword.setScale(side, attackType === 'super_dash' ? 1.5 : 2.0);
         } else if (attackType === 'super_up') {
             rightHand.setPosition(px, py - 80 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
@@ -329,7 +322,6 @@ function update() {
             sword.setAngle(180);
             sword.setScale(side, 1.8);
         } else {
-            // slash挙動
             let p = attackProgress;
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
             let endAng = (attackDir.y < -0.4) ? -30 : (attackDir.y > 0.4 ? 160 : 60);
