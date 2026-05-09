@@ -22,11 +22,13 @@
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 // --- 調整用パラメータ定数 ---
-const CHARGE_TIME_THRESHOLD = 250; // チャージに必要な時間(ms)
-const SUPER_DASH_SPEED = 1200;      // 横強攻撃の突進速度
-const SUPER_DASH_DURATION = 600;   // 横強攻撃の持続時間(ms)
-const SUPER_UP_VELOCITY = -1300;   // 上強攻撃の跳躍力
-const METEOR_SPEED = 1500;         // 下強攻撃(メテオ)の降下速度
+const CHARGE_TIME_THRESHOLD = 250; 
+const NORMAL_MOVE_ACCEL = 2200;    // 通常移動の加速度（以前の値に調整）
+const NORMAL_MAX_VELOCITY = 400;   // 通常移動の最高速度
+const SUPER_DASH_SPEED = 1300;     // 横強攻撃の突進速度（さらに強化）
+const SUPER_DASH_DURATION = 650;   // 横強攻撃の持続時間
+const SUPER_UP_VELOCITY = -1400;   // 上強攻撃の跳躍力（調整可能に）
+const METEOR_SPEED = 1600;         // 下強攻撃(メテオ)の降下速度
 // -----------------------
 
 const config = {
@@ -60,6 +62,7 @@ let movePointerId = null;
 let atkPointerId = null;
 
 function preload() {
+    // パスはGitHub Pagesの環境に合わせ相対パスを維持
     this.load.image('head', 'rabbit_head.png');
     this.load.image('body', 'rabbit_body.png');
     this.load.image('hand', 'rabbit_hand.png');
@@ -89,7 +92,7 @@ function create() {
     this.physics.world.enable(playerMain);
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(3500); 
-    playerMain.body.setMaxVelocity(1200, 1500); // メテオ・突進用に最大値を拡張
+    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600); 
     playerMain.body.setSize(50, 85);
     playerMain.body.setOffset(-25, -42);
 
@@ -97,10 +100,10 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
-    this.physics.add.collider(playerMain, platforms, (obj1, obj2) => {
-        // メテオ中に地面に当たったら攻撃終了
+    this.physics.add.collider(playerMain, platforms, () => {
         if (isAttacking && attackType === 'super_meteor') {
             isAttacking = false;
+            playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600);
         }
     });
 
@@ -154,13 +157,11 @@ function create() {
                 if (!isAttacking) {
                     const d = Phaser.Math.Distance.Between(atkX, uiY, atkStick.x, atkStick.y);
                     if (isCharging && d > 20) {
-                        // 強攻撃分岐
                         if (atkJoyInput.y < -0.6) startAttack(scene, 'super_up', {x: 0, y: -1});
                         else if (atkJoyInput.y > 0.6) startAttack(scene, 'super_meteor', {x: 0, y: 1});
                         else if (Math.abs(atkJoyInput.x) > 0.5) startAttack(scene, 'super_dash', {x: atkJoyInput.x > 0 ? 1 : -1, y: 0});
                         else startAttack(scene, 'slash', {x: atkJoyInput.x, y: atkJoyInput.y});
                     } else {
-                        // 通常攻撃分岐
                         if (d > 20) startAttack(scene, 'slash', {x: atkJoyInput.x, y: atkJoyInput.y});
                         else startAttack(scene, 'stab');
                     }
@@ -202,9 +203,15 @@ function startAttack(scene, type, dir = null) {
 
     let duration = 150;
     if (type === 'stab') duration = 250;
-    if (type === 'super_dash') duration = SUPER_DASH_DURATION;
-    if (type === 'super_up') duration = 500;
-    if (type === 'super_meteor') duration = 2000; // 地面に当たるまでの予備時間
+    if (type === 'super_dash') {
+        duration = SUPER_DASH_DURATION;
+        playerMain.body.setMaxVelocity(SUPER_DASH_SPEED, 1600);
+    }
+    if (type === 'super_up') {
+        duration = 500;
+        playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, Math.abs(SUPER_UP_VELOCITY));
+    }
+    if (type === 'super_meteor') duration = 3000;
 
     scene.tweens.add({
         targets: { val: 0 },
@@ -224,10 +231,10 @@ function startAttack(scene, type, dir = null) {
             }
         },
         onComplete: () => { 
-            // メテオ以外の攻撃は時間で終了
             if (type !== 'super_meteor') {
                 isAttacking = false; 
-                if (type.includes('super')) playerMain.body.setVelocityX(playerMain.body.velocity.x * 0.2);
+                playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600);
+                if (type.includes('super')) playerMain.body.setVelocityX(playerMain.body.velocity.x * 0.1);
             }
         }
     });
@@ -236,20 +243,17 @@ function startAttack(scene, type, dir = null) {
 function update() {
     let time = this.time.now;
 
-    // チャージ判定のみ（演出は削除）
     if (atkPointerId !== null && !isAttacking) {
         let elapsed = time - chargeTimer;
-        isCharging = (elapsed / CHARGE_TIME_THRESHOLD >= 1);
+        isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-    
-    // 特定のアクション中は移動入力を制限
     const isSpecialMovement = (attackType === 'super_dash' || attackType === 'super_up' || attackType === 'super_meteor');
 
     if (!isAttacking || !isSpecialMovement) {
         if (Math.abs(moveX) > 0.2) {
-            playerMain.body.setAccelerationX(moveX * 4000);
+            playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
             if (!isAttacking) playerMain.setScale(moveX < 0 ? -1 : 1, 1);
         } else {
             playerMain.body.setAccelerationX(0);
@@ -263,7 +267,7 @@ function update() {
     let side = playerMain.scaleX;
 
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
-    let leanAngle = isMoving ? (playerMain.body.velocity.x / 400) * 12 : 0;
+    let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
 
     body.y = 8 + totalBounceY;
     head.y = -24 + totalBounceY;
@@ -289,17 +293,17 @@ function update() {
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
-            sword.setScale(side, 2.0); // 突進中は剣を大きく
+            sword.setScale(side, 2.0);
         } else if (attackType === 'super_up') {
-            rightHand.setPosition(px, py - 80 + totalBounceY);
+            rightHand.setPosition(px, py - 85 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(0);
-            sword.setScale(side, 2.2);
+            sword.setScale(side, 2.3);
         } else if (attackType === 'super_meteor') {
-            rightHand.setPosition(px, py + 80 + totalBounceY);
+            rightHand.setPosition(px, py + 85 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(180);
-            sword.setScale(side, 2.2);
+            sword.setScale(side, 2.3);
         } else {
             let p = attackProgress;
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
