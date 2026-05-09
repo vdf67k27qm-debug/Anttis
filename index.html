@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Final Fix Edition</title>
+    <title>Scribble Battle - Ultra Stability Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -54,6 +54,7 @@ let isAttacking = false;
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
 let attackLockedSide = 1; 
+let facingSide = 1; // 【新設】ロジック上の向きを管理する変数
 let attackProgress = 0;
 let currentTween = null;
 
@@ -216,22 +217,23 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
-    // 【厳重検証ポイント1】攻撃直前の向きを確実にキャプチャ
-    attackLockedSide = playerMain.scaleX;
+    // 【ChatGPT修正案の反映】
+    // 現在向いている方向を固定してコピー
+    attackLockedSide = facingSide;
 
-    // 攻撃入力の横方向が明確な場合のみ反転
-    if (dir && Math.abs(dir.x) > 0.2) {
+    // 横入力が十分に大きい（0.5）場合のみ、その方向へ向きを更新
+    if (dir && Math.abs(dir.x) > 0.5) {
         attackLockedSide = dir.x > 0 ? 1 : -1;
+        facingSide = attackLockedSide; // ロジック上の向きも更新
     }
     
-    playerMain.setScale(attackLockedSide, 1);
+    playerMain.setScale(facingSide, 1);
 
     attackDir = { 
         x: (dir) ? dir.x : 0, 
         y: (dir) ? dir.y : 0 
     };
 
-    // 【厳重検証ポイント2】空中攻撃時のDragを排除
     if (!playerMain.body.touching.down && (type === 'slash' || type === 'stab')) {
         playerMain.body.setDragX(0);
     }
@@ -289,22 +291,24 @@ function update() {
         playerMain.body.setDragX(NORMAL_DRAG);
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-            playerMain.setScale(moveX < 0 ? -1 : 1, 1);
+            // 【ChatGPT修正案の反映】
+            facingSide = moveX < 0 ? -1 : 1;
+            playerMain.setScale(facingSide, 1);
         } else {
             playerMain.body.setAccelerationX(0);
         }
     } else {
         playerMain.body.setAccelerationX(0);
-        playerMain.setScale(attackLockedSide, 1);
+        playerMain.setScale(attackLockedSide, 1); // 攻撃開始時に固定した値を維持
         
-        // 攻撃中に着地したら摩擦を戻して滑りすぎを防止
         if (isOnGround && attackType !== 'super_dash') {
             playerMain.body.setDragX(NORMAL_DRAG);
         }
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
-    let side = isAttacking ? attackLockedSide : playerMain.scaleX;
+    // 描画用のside変数を攻撃中は固定された値にする
+    let side = isAttacking ? attackLockedSide : facingSide;
 
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
@@ -345,12 +349,10 @@ function update() {
             sword.setAngle(180);
             sword.setScale(side, 1.8);
         } else {
-            // 【厳重検証ポイント3】弱攻撃（上下含む）の鏡合わせロジック
             let p = attackProgress;
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
             let endAng = (attackDir.y < -0.4) ? -30 : (attackDir.y > 0.4 ? 160 : 60);
             let currentAng = startAng + (p * (endAng - startAng));
-            
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * 65;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * 65;
             
