@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Advanced Motion Edition</title>
+    <title>Scribble Battle - Refined Motion Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -26,12 +26,18 @@ const CHARGE_TIME_THRESHOLD = 250;
 const NORMAL_MOVE_ACCEL = 2200;
 const NORMAL_MAX_VELOCITY = 400;
 const NORMAL_DRAG = 3500;
+const JUMP_VELOCITY_MAX = -1150; // 強化されたジャンプ初速
+const JUMP_VELOCITY_MIN = -950;  // 2段目/最小時の速度向上
 const SUPER_DASH_SPEED = 1000;
 const SUPER_DASH_DURATION = 400;
 const SUPER_UP_VELOCITY = -1200;
 const METEOR_SPEED = 1300;
 const ATTACK_RECOIL = 200; 
-const DUST_COLOR = 0xd2b48c; // 砂埃の色（薄茶色）
+const DUST_COLOR = 0xd2b48c; 
+
+// アニメーション定数
+const BOUNCE_AMPLITUDE_MOVE = 4; // 移動時の揺れ幅 (8→4に抑制)
+const BOUNCE_AMPLITUDE_IDLE = 1; // 待機時の揺れ幅 (2→1に抑制)
 // -----------------------
 
 const config = {
@@ -42,7 +48,7 @@ const config = {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     physics: {
         default: 'arcade',
-        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 64 }
+        arcade: { gravity: { y: 2600 }, debug: false, overlapBias: 64 } // 重力を少し上げ、キレを出す
     },
     scene: { preload: preload, create: create, update: update }
 };
@@ -67,8 +73,8 @@ let atkJoyInput = { x: 0, y: 0 };
 let movePointerId = null;
 let atkPointerId = null;
 
-let isJumpPressed = false; // ジャンプ高度調整用
-let dustGroup; // 砂埃エフェクト用グループ
+let isJumpPressed = false; 
+let dustGroup; 
 
 function preload() {
     this.load.image('head', 'rabbit_head.png');
@@ -102,7 +108,7 @@ function create() {
     this.physics.world.enable(playerMain);
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(NORMAL_DRAG); 
-    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600); 
+    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800); 
     playerMain.body.setSize(50, 85);
     playerMain.body.setOffset(-25, -42);
 
@@ -120,7 +126,6 @@ function create() {
             b.setVelocityY(ATTACK_RECOIL);
             stopAttack();
         } else if (attackType === 'super_meteor' && b.blocked.down) {
-            // 地面衝突時に反動で少し浮く演出
             b.setVelocityY(-450); 
             stopAttack();
         }
@@ -197,10 +202,10 @@ function create() {
             isJumpPressed = true;
             if (playerMain.body.touching.down) {
                 jumpCount = 1;
-                playerMain.body.setVelocityY(-1000);
+                playerMain.body.setVelocityY(JUMP_VELOCITY_MAX);
             } else if (jumpCount < 2) {
                 jumpCount++;
-                playerMain.body.setVelocityY(-900);
+                playerMain.body.setVelocityY(JUMP_VELOCITY_MIN);
             }
         });
         btnJ.on('pointerup', () => {
@@ -232,11 +237,8 @@ function createDustEffect(scene, x, y) {
 function stopAttack() {
     isAttacking = false;
     if (currentTween) currentTween.stop();
-    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1600);
+    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800);
     playerMain.body.setDragX(NORMAL_DRAG); 
-    if (attackType === 'super_meteor') {
-        // 反動後の制御を戻すため、ここでは物理的な速度ゼロ化はしない
-    }
 }
 
 function startAttack(scene, type, dir = null) {
@@ -245,7 +247,6 @@ function startAttack(scene, type, dir = null) {
     isAttacking = true;
     attackType = type;
     attackProgress = 0;
-    
     attackLockedSide = facingSide;
 
     if (dir && Math.abs(dir.x) > 0.5) {
@@ -254,11 +255,7 @@ function startAttack(scene, type, dir = null) {
     }
     
     playerMain.setScale(facingSide, 1);
-
-    attackDir = { 
-        x: (dir) ? dir.x : 0, 
-        y: (dir) ? dir.y : 0 
-    };
+    attackDir = { x: dir ? dir.x : 0, y: dir ? dir.y : 0 };
 
     if (!playerMain.body.touching.down && (type === 'slash' || type === 'stab')) {
         playerMain.body.setDragX(0);
@@ -268,7 +265,7 @@ function startAttack(scene, type, dir = null) {
     if (type === 'stab') duration = 250;
     if (type === 'super_dash') {
         duration = SUPER_DASH_DURATION;
-        playerMain.body.setMaxVelocity(SUPER_DASH_SPEED, 1600);
+        playerMain.body.setMaxVelocity(SUPER_DASH_SPEED, 1800);
         playerMain.body.setDragX(0); 
     }
     if (type === 'super_up') {
@@ -305,9 +302,9 @@ function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
 
-    // ジャンプ高度調整
+    // 可変ジャンプ制御: ボタンを離すと上昇力を急激に減衰させる
     if (!isJumpPressed && playerMain.body.velocity.y < -100) {
-        playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.85);
+        playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.75);
     }
 
     if (atkPointerId !== null && !isAttacking) {
@@ -317,23 +314,17 @@ function update() {
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
-    // 攻撃中の移動制御の変更
     if (!isAttacking) {
         playerMain.body.setDragX(NORMAL_DRAG);
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
             facingSide = moveX < 0 ? -1 : 1;
             playerMain.setScale(facingSide, 1);
-            
-            // 地面移動時の砂埃エフェクト
-            if (isOnGround && time % 5 === 0) {
-                createDustEffect(this, playerMain.x, playerMain.y);
-            }
+            if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
         } else {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        // 強攻撃上下の最中は左右移動を許可
         if (attackType === 'super_up' || attackType === 'super_meteor') {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
             if (Math.abs(moveX) > 0.2) {
@@ -343,18 +334,15 @@ function update() {
         } else {
             playerMain.body.setAccelerationX(0);
         }
-        
         playerMain.setScale(attackLockedSide, 1); 
-        
-        if (isOnGround && attackType !== 'super_dash') {
-            playerMain.body.setDragX(NORMAL_DRAG);
-        }
+        if (isOnGround && attackType !== 'super_dash') playerMain.body.setDragX(NORMAL_DRAG);
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
 
-    let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
+    // --- 体の揺れ調整箇所 ---
+    let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
 
     body.y = 8 + totalBounceY;
@@ -399,7 +387,6 @@ function update() {
             let currentAng = startAng + (p * (endAng - startAng));
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * 65;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * 65;
-            
             rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle((currentAng + 90) * side);
