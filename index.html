@@ -52,6 +52,7 @@ let jumpCount = 0;
 let isAttacking = false;
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
+let attackLockedSide = 1; // 攻撃開始時の向きを完全に固定保存する変数
 let attackProgress = 0;
 let currentTween = null;
 
@@ -208,22 +209,26 @@ function stopAttack() {
 
 function startAttack(scene, type, dir = null) {
     if (isAttacking) return;
+    
+    // 攻撃開始時点の状態を完全に独立した変数として固定する
     isAttacking = true;
     attackType = type;
     attackProgress = 0;
     
-    // 【修正箇所】向きの確定ロジックの厳格化
-    // x入力がしきい値(0.1)より大きい場合のみ向きを変更
-    if (dir && Math.abs(dir.x) > 0.1) {
-        playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
-    } 
-    // それ以外（真上、真下など）は、現在の playerMain.scaleX を維持
+    // 【重要】現在のプレイヤーの向き（scaleX）を攻撃が終わるまでロックする
+    attackLockedSide = playerMain.scaleX;
 
-    // 内部的な攻撃方向を保存。xが0に近い場合は現在の向き(scaleX)を代入して固定する
-    attackDir = dir ? { ...dir } : { x: playerMain.scaleX, y: 0 };
-    if (Math.abs(attackDir.x) <= 0.1) {
-        attackDir.x = playerMain.scaleX;
+    // ジョイスティックによる向きの変更（x入力が明確にある場合のみ更新）
+    if (dir && Math.abs(dir.x) > 0.2) {
+        attackLockedSide = dir.x > 0 ? 1 : -1;
+        playerMain.setScale(attackLockedSide, 1);
     }
+
+    // attackDirを新規オブジェクトとして生成し、汚染を断絶する
+    attackDir = { 
+        x: (dir && Math.abs(dir.x) > 0.1) ? dir.x : 0, 
+        y: (dir) ? dir.y : 0 
+    };
 
     let duration = 150;
     if (type === 'stab') duration = 250;
@@ -247,7 +252,7 @@ function startAttack(scene, type, dir = null) {
         onUpdate: (tween) => { 
             attackProgress = tween.getValue();
             if (type === 'super_dash') {
-                playerMain.body.setVelocityX(playerMain.scaleX * SUPER_DASH_SPEED);
+                playerMain.body.setVelocityX(attackLockedSide * SUPER_DASH_SPEED);
                 playerMain.body.setVelocityY(0);
             } else if (type === 'super_up') {
                 playerMain.body.setVelocityY(SUPER_UP_VELOCITY);
@@ -272,7 +277,7 @@ function update() {
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
-    // 【重要】攻撃中は向きの自動更新を完全に遮断
+    // 攻撃中は向きの物理的更新および入力による反転を完全に拒絶する
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
@@ -281,12 +286,16 @@ function update() {
             playerMain.body.setAccelerationX(0);
         }
     } else {
+        // 攻撃中は加速度を切り、現在の物理的な向き（scaleX）を攻撃開始時の値で維持
         playerMain.body.setAccelerationX(0);
+        playerMain.setScale(attackLockedSide, 1);
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let isOnGround = playerMain.body.touching.down;
-    let side = playerMain.scaleX; // 現在のスケールを使用
+    
+    // 描画用のside変数を攻撃中は固定された値にする
+    let side = isAttacking ? attackLockedSide : playerMain.scaleX;
 
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
@@ -327,16 +336,15 @@ function update() {
             sword.setAngle(180);
             sword.setScale(side, 1.8);
         } else {
-            // 弱攻撃（slash）計算
+            // 弱攻撃（slash）計算：attackLockedSideと独立した新規attackDirを使用
             let p = attackProgress;
-            // attackDir.y に基づいて上下の切り分けを行うが、左右の向きは side (scaleX) に従う
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
             let endAng = (attackDir.y < -0.4) ? -30 : (attackDir.y > 0.4 ? 160 : 60);
             let currentAng = startAng + (p * (endAng - startAng));
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * 65;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * 65;
             
-            // sideを掛けることで左右反転に対応しつつ、現在の向きを維持
+            // 攻撃開始時に固定したsideを用いて描画位置と角度を鏡合わせにする
             rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle((currentAng + 90) * side);
