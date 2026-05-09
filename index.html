@@ -42,10 +42,10 @@ const SHIELD_DECAY = 0.006;
 const SHIELD_RECOVERY = 0.004;  
 
 // 回避距離調整 (Duration * Speed = Distance)
-// キャラ幅 50px
-const DODGE_DURATION = 300;      // 回避時間を少し短くしてキレを出す
-const DODGE_SPEED_GROUND = 1000;  // 約108px (2キャラ強)
-const DODGE_SPEED_AIR = 600;     // 約54px (1キャラ強)
+const DODGE_DURATION = 200;       
+const DODGE_SPEED_GROUND = 800;   // ここを変えると確実に距離が変わります
+const DODGE_SPEED_AIR = 500;      // ここを変えると確実に距離が変わります
+const FAST_FALL_SPEED = 1000;     // 下入力時の急降下速度
 
 const BOUNCE_AMPLITUDE_MOVE = 4; 
 const BOUNCE_AMPLITUDE_IDLE = 1; 
@@ -73,7 +73,7 @@ let isAttacking = false;
 let isGuarding = false;
 let isDodging = false;
 let canAttackInAir = true; 
-let airDodgeUsed = false;  // これが true の間、空中で全行動禁止
+let airDodgeUsed = false; 
 let shieldValue = 1.0; 
 
 let attackType = 'slash'; 
@@ -170,7 +170,7 @@ function create() {
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointerdown', (p) => {
-            if (airDodgeUsed) return; // 空中回避後は一切の操作を無視
+            if (airDodgeUsed) return; 
             if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 95, uiY + 10) < 35) return;
             if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 40, uiY - 75) < 35) return;
             if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
@@ -182,14 +182,13 @@ function create() {
         });
 
         this.input.on('pointermove', (p) => {
-            if (airDodgeUsed) return; 
             if (p.id === movePointerId) {
                 const ang = Phaser.Math.Angle.Between(joyX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(joyX, uiY, p.x, p.y), radius);
                 joyStick.setPosition(joyX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 joyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
-            if (p.id === atkPointerId) {
+            if (p.id === atkPointerId && !airDodgeUsed) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
                 atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
@@ -265,9 +264,10 @@ function startDodge(scene, dx, dy, isAir) {
     let speed = isAir ? DODGE_SPEED_AIR : DODGE_SPEED_GROUND;
     let vx = dx * speed;
     let vy = dy * speed;
-    // 入力がない場合は向いている方向に回避
     if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * speed;
 
+    // 回避中の物理設定：Dragを無効化して設定した速度が正確に反映されるようにする
+    playerMain.body.setDragX(0);
     playerMain.body.setVelocity(vx, vy * 0.5);
     playerMain.body.setAcceleration(0, 0);
     playerMain.setAlpha(0.5); 
@@ -275,7 +275,7 @@ function startDodge(scene, dx, dy, isAir) {
     scene.time.delayedCall(DODGE_DURATION, () => {
         isDodging = false;
         playerMain.setAlpha(1);
-        // 回避終了時に地上なら停止、空中なら慣性維持
+        playerMain.body.setDragX(NORMAL_DRAG); // 回避終了後にDragを戻す
         if (playerMain.body.touching.down) playerMain.body.setVelocityX(0);
     });
 }
@@ -350,9 +350,13 @@ function update() {
         airDodgeUsed = false;
         canAttackInAir = true;
         jumpCount = 0;
+    } else {
+        // 空中急降下（ジョイスティック下入力）
+        if (joyInput.y > 0.5) {
+            playerMain.body.setVelocityY(FAST_FALL_SPEED);
+        }
     }
 
-    // シールド・ゲージ制御
     if (isShieldPressed && isOnGround && !isAttacking && !isDodging && !airDodgeUsed) {
         if (Math.abs(joyInput.x) > 0.7) {
             startDodge(this, joyInput.x > 0 ? 1 : -1, 0, false);
@@ -367,7 +371,7 @@ function update() {
 
     if (isGuarding) {
         shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
-        shieldSprite.setAlpha(1.0); // 素材の透明度を活かすため1.0に設定
+        shieldSprite.setAlpha(1.0); 
         let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
         shieldSprite.setScale(s);
     } else {
@@ -375,7 +379,6 @@ function update() {
         shieldSprite.setAlpha(0);
     }
 
-    // 可変ジャンプ調整
     if (!isJumpPressed && playerMain.body.velocity.y < -100) {
         playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.9); 
     }
@@ -385,19 +388,19 @@ function update() {
         isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
     }
 
-    // 入力計算
-    let moveX = 0;
-    if (!airDodgeUsed || isOnGround) {
-        moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-    }
+    // 入力計算：空中回避後も移動(moveX)だけは許可
+    let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
     if (!isAttacking) {
         if (!isGuarding && !isDodging) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
                 playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-                facingSide = moveX < 0 ? -1 : 1;
-                playerMain.setScale(facingSide, 1);
+                // 空中回避後は向きを変えない（必要なら解除可能）
+                if (!airDodgeUsed || isOnGround) {
+                    facingSide = moveX < 0 ? -1 : 1;
+                    playerMain.setScale(facingSide, 1);
+                }
                 if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
             } else {
                 playerMain.body.setAccelerationX(0);
@@ -419,7 +422,6 @@ function update() {
         playerMain.setScale(attackLockedSide, 1); 
     }
     
-    // ビジュアル更新
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
