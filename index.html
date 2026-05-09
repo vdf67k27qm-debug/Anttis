@@ -40,7 +40,7 @@ const config = {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     physics: {
         default: 'arcade',
-        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 64 } // めり込み防止強化
+        arcade: { gravity: { y: 2400 }, debug: false, overlapBias: 64 }
     },
     scene: { preload: preload, create: create, update: update }
 };
@@ -101,21 +101,16 @@ function create() {
     sword = this.add.sprite(0, 0, 'sword').setOrigin(0.5, 0.85).setDepth(12);
     rightHand = this.add.sprite(0, 0, 'hand').setDepth(13);
 
-    // 強攻撃時の衝突判定ロジック（地上発動バグ対応）
     this.physics.add.collider(playerMain, platforms, (p, platform) => {
         if (!isAttacking) return;
-        
         const b = playerMain.body;
         if (attackType === 'super_dash' && (b.blocked.left || b.blocked.right)) {
-            // 壁にぶつかった時のみ停止
             b.setVelocityX(-b.velocity.x * 0.2);
             stopAttack();
         } else if (attackType === 'super_up' && b.blocked.up) {
-            // 天井にぶつかった時のみ停止
             b.setVelocityY(ATTACK_RECOIL);
             stopAttack();
         } else if (attackType === 'super_meteor' && b.blocked.down) {
-            // 地面にぶつかった時のみ停止
             b.setVelocityY(-ATTACK_RECOIL * 0.5);
             stopAttack();
         }
@@ -217,14 +212,18 @@ function startAttack(scene, type, dir = null) {
     attackType = type;
     attackProgress = 0;
     
-    // 向きの確定: 純粋な垂直入力時は現在の向きを維持
+    // 【修正箇所】向きの確定ロジックの厳格化
+    // x入力がしきい値(0.1)より大きい場合のみ向きを変更
     if (dir && Math.abs(dir.x) > 0.1) {
         playerMain.setScale(dir.x > 0 ? 1 : -1, 1);
-    }
-    
+    } 
+    // それ以外（真上、真下など）は、現在の playerMain.scaleX を維持
+
+    // 内部的な攻撃方向を保存。xが0に近い場合は現在の向き(scaleX)を代入して固定する
     attackDir = dir ? { ...dir } : { x: playerMain.scaleX, y: 0 };
-    // attackDir.x が 0 の場合、描画計算用に現在の向きを保持
-    if (Math.abs(attackDir.x) < 0.1) attackDir.x = 0;
+    if (Math.abs(attackDir.x) <= 0.1) {
+        attackDir.x = playerMain.scaleX;
+    }
 
     let duration = 150;
     if (type === 'stab') duration = 250;
@@ -273,7 +272,7 @@ function update() {
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     
-    // 攻撃中は向きの自動リセットを防ぐ
+    // 【重要】攻撃中は向きの自動更新を完全に遮断
     if (!isAttacking) {
         if (Math.abs(moveX) > 0.2) {
             playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
@@ -282,13 +281,12 @@ function update() {
             playerMain.body.setAccelerationX(0);
         }
     } else {
-        // 攻撃中は手動加速のみ停止（慣性は維持される）
         playerMain.body.setAccelerationX(0);
     }
     
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let isOnGround = playerMain.body.touching.down;
-    let side = playerMain.scaleX;
+    let side = playerMain.scaleX; // 現在のスケールを使用
 
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * 8 : Math.sin(time / 350) * 2);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
@@ -313,12 +311,10 @@ function update() {
         rightHand.setAngle(0); 
         if (attackType === 'stab' || attackType === 'super_dash') {
             let p = (attackType === 'super_dash') ? 1 : (attackProgress * 2) % 1;
-            // 横強攻撃時の乖離を修正 (thrust: 60)
             let thrust = (attackType === 'super_dash') ? 60 : Math.sin(p * Math.PI) * 75;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle(90 * side);
-            // スケールを最適化
             sword.setScale(side, attackType === 'super_dash' ? 1.5 : 2.0);
         } else if (attackType === 'super_up') {
             rightHand.setPosition(px, py - 80 + totalBounceY);
@@ -331,14 +327,16 @@ function update() {
             sword.setAngle(180);
             sword.setScale(side, 1.8);
         } else {
-            // 弱攻撃（slash）
+            // 弱攻撃（slash）計算
             let p = attackProgress;
-            // attackDir.y に基づいた切り払い角度の決定
+            // attackDir.y に基づいて上下の切り分けを行うが、左右の向きは side (scaleX) に従う
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
             let endAng = (attackDir.y < -0.4) ? -30 : (attackDir.y > 0.4 ? 160 : 60);
             let currentAng = startAng + (p * (endAng - startAng));
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * 65;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * 65;
+            
+            // sideを掛けることで左右反転に対応しつつ、現在の向きを維持
             rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + totalBounceY);
             sword.setPosition(rightHand.x, rightHand.y);
             sword.setAngle((currentAng + 90) * side);
