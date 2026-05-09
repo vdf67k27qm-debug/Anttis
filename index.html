@@ -35,13 +35,13 @@ const METEOR_SPEED = 1300;
 const ATTACK_RECOIL = 200; 
 const DUST_COLOR = 0xd2b48c; 
 
-// --- ガード・回避パラメータ ---
-const SHIELD_MAX_HEALTH = 100;
-const SHIELD_DRAIN_RATE = 0.5;   // 1フレームあたりの減少量
-const SHIELD_REGEN_RATE = 0.2;  // 1フレームあたりの回復量
-const SHIELD_MIN_SCALE = 0.4;    // これ以下になると消滅
+// ガード・回避用定数
+const SHIELD_SIZE_MAX = 1.2;
+const SHIELD_SIZE_MIN = 0.4;
+const SHIELD_DECAY = 0.005;     // 使用中の縮小速度
+const SHIELD_RECOVERY = 0.003;  // 非使用時の回復速度
 const DODGE_SPEED = 900;
-const DODGE_DURATION = 250;
+const DODGE_DURATION = 200;
 
 const BOUNCE_AMPLITUDE_MOVE = 4; 
 const BOUNCE_AMPLITUDE_IDLE = 1; 
@@ -63,14 +63,14 @@ const config = {
 const game = new Phaser.Game(config);
 
 let playerMain, body, head, leftHand, rightHand, sword, platforms;
-let shieldVisual; // シールド画像
+let shieldSprite; // 追加
 let jumpCount = 0;
 let isAttacking = false;
-let isGuarding = false;
-let isDodging = false;
-let canAttackAfterDodge = true; // 回避後の攻撃制限
-let shieldHealth = SHIELD_MAX_HEALTH;
-let airDodgeUsed = false;
+let isGuarding = false; // 追加
+let isDodging = false;  // 追加
+let canAttackInAir = true; // 空中回避後の制約用
+let airDodgeUsed = false;  // 1回制限用
+let shieldValue = 1.0;     // ガードサイズ（0.0〜1.0）
 
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
@@ -86,7 +86,7 @@ let atkJoyInput = { x: 0, y: 0 };
 let movePointerId = null;
 let atkPointerId = null;
 let isJumpPressed = false; 
-let isShieldPressed = false;
+let isShieldPressed = false; // 追加
 let dustGroup; 
 
 function preload() {
@@ -95,7 +95,7 @@ function preload() {
     this.load.image('hand', 'rabbit_hand.png');
     this.load.image('sword', 'rabbit_sword.png');
     this.load.image('tile', 'tile_top.png');
-    this.load.image('shield', 'shield.png'); // 新規素材
+    this.load.image('shield', 'shield.png'); // 追加
 }
 
 function create() {
@@ -115,12 +115,12 @@ function create() {
     body = this.add.sprite(0, 8, 'body');
     head = this.add.sprite(0, -24, 'head');
     
-    // シールド表示の設定
-    shieldVisual = this.add.sprite(0, 0, 'shield');
-    shieldVisual.setAlpha(0); // 初期は非表示
-    shieldVisual.setTint(0x88ccff); // 青みがらせる
+    // シールドの初期設定
+    shieldSprite = this.add.sprite(0, 0, 'shield');
+    shieldSprite.setAlpha(0); // 通常は隠す
+    shieldSprite.setTint(0x88ccff); // 青みがらせる
     
-    playerMain.add([body, head, shieldVisual]);
+    playerMain.add([body, head, shieldSprite]);
     playerMain.setDepth(11);
 
     this.physics.world.enable(playerMain);
@@ -159,12 +159,10 @@ function create() {
         const joyStick = this.add.circle(joyX, uiY, 20, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
         this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
         const atkStick = this.add.circle(atkX, uiY, 20, 0xff0000, 0.2).setScrollFactor(0).setDepth(102);
-        
-        // JUMP
         const btnJ = this.add.circle(atkX - 95, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
         this.add.text(atkX - 95, uiY + 10, 'JUMP', {fontSize:'12px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
-        // SHIELD (新設)
+        // SHIELDボタン
         const btnS = this.add.circle(atkX - 40, uiY - 75, 35, 0x00ffff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
@@ -201,7 +199,7 @@ function create() {
                 movePointerId = null;
             }
             if (p.id === atkPointerId) {
-                if (!isAttacking && canAttackAfterDodge) {
+                if (!isAttacking && !isGuarding && !isDodging && canAttackInAir) {
                     const d = Phaser.Math.Distance.Between(atkX, uiY, atkStick.x, atkStick.y);
                     if (isCharging && d > 20) {
                         if (atkJoyInput.y < -0.6) startAttack(scene, 'super_up', {x: 0, y: -1});
@@ -224,8 +222,8 @@ function create() {
         this.input.on('pointercancel', releasePointer);
 
         btnJ.on('pointerdown', () => {
+            if (isGuarding || isDodging) return;
             isJumpPressed = true;
-            if (isGuarding || isDodging) return; // ガード中はジャンプ不可
             if (playerMain.body.touching.down) {
                 jumpCount = 1;
                 playerMain.body.setVelocityY(JUMP_VELOCITY_MAX);
@@ -238,9 +236,11 @@ function create() {
         btnJ.on('pointerout', () => isJumpPressed = false);
 
         btnS.on('pointerdown', () => {
+            if (isAttacking || isDodging) return;
             isShieldPressed = true;
+            // 空中回避のトリガー
             if (!playerMain.body.touching.down && !airDodgeUsed) {
-                startDodge(scene, joyInput.x, joyInput.y);
+                startDodge(scene, joyInput.x, joyInput.y, true);
             }
         });
         btnS.on('pointerup', () => isShieldPressed = false);
@@ -250,21 +250,20 @@ function create() {
     this.cursors = this.input.keyboard.createCursorKeys();
 }
 
-function startDodge(scene, dx, dy) {
+function startDodge(scene, dx, dy, isAir) {
     if (isDodging) return;
     isDodging = true;
     isGuarding = false;
     
-    let isAir = !playerMain.body.touching.down;
     if (isAir) {
         airDodgeUsed = true;
-        canAttackAfterDodge = false; // 空中回避後は攻撃不可
+        canAttackInAir = false; // 着地まで攻撃不可
     }
 
-    // 回避方向の決定
+    // 回避方向
     let vx = dx * DODGE_SPEED;
     let vy = dy * DODGE_SPEED;
-    if (dx === 0 && dy === 0) vx = facingSide * DODGE_SPEED;
+    if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * DODGE_SPEED;
 
     playerMain.body.setVelocity(vx, vy * 0.5);
     playerMain.body.setAcceleration(0, 0);
@@ -273,7 +272,7 @@ function startDodge(scene, dx, dy) {
     scene.time.delayedCall(DODGE_DURATION, () => {
         isDodging = false;
         playerMain.setAlpha(1);
-        if (!isAir) playerMain.body.setVelocityX(0);
+        if (playerMain.body.touching.down) playerMain.body.setVelocityX(0);
     });
 }
 
@@ -285,7 +284,7 @@ function stopAttack() {
 }
 
 function startAttack(scene, type, dir = null) {
-    if (isAttacking || isGuarding || isDodging || !canAttackAfterDodge) return;
+    if (isAttacking || isGuarding || isDodging || !canAttackInAir) return;
     
     isAttacking = true;
     attackType = type;
@@ -343,47 +342,50 @@ function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
 
-    // 接地時のリセット
+    // 接地時リセット
     if (isOnGround) {
         airDodgeUsed = false;
-        canAttackAfterDodge = true;
+        canAttackInAir = true;
         jumpCount = 0;
     }
 
-    // --- ガード & 回避ロジック ---
+    // ガード・回避判定
     if (isShieldPressed && isOnGround && !isAttacking && !isDodging) {
-        if (Math.abs(joyInput.x) > 0.6) {
-            startDodge(this, joyInput.x > 0 ? 1 : -1, 0);
-        } else {
+        if (Math.abs(joyInput.x) > 0.7) {
+            startDodge(this, joyInput.x > 0 ? 1 : -1, 0, false);
+        } else if (shieldValue > SHIELD_SIZE_MIN) {
             isGuarding = true;
+        } else {
+            isGuarding = false;
         }
     } else {
         isGuarding = false;
     }
 
-    // ガード耐久値の裏側計算
+    // ガード耐久値の更新（裏側ゲージ）
     if (isGuarding) {
-        shieldHealth -= SHIELD_DRAIN_RATE;
-        if (shieldHealth <= 0) {
-            isGuarding = false; // シールドブレイク（強制解除）
-            shieldHealth = -20; // ペナルティ
-        }
+        shieldValue -= SHIELD_DECAY;
+        if (shieldValue < SHIELD_SIZE_MIN) isGuarding = false;
     } else {
-        if (shieldHealth < SHIELD_MAX_HEALTH) shieldHealth += SHIELD_REGEN_RATE;
+        if (shieldValue < 1.0) shieldValue += SHIELD_RECOVERY;
     }
 
-    // シールドのビジュアル更新
-    let sScale = (shieldHealth / SHIELD_MAX_HEALTH) * 1.2;
-    if (isGuarding && sScale > SHIELD_MIN_SCALE) {
-        shieldVisual.setAlpha(0.6);
-        shieldVisual.setScale(sScale);
+    // シールドビジュアル反映
+    if (isGuarding) {
+        shieldSprite.setAlpha(0.6);
+        shieldSprite.setScale(shieldValue * SHIELD_SIZE_MAX);
     } else {
-        shieldVisual.setAlpha(0);
+        shieldSprite.setAlpha(0);
     }
 
-    // 可変ジャンプ制御
+    // 可変ジャンプ
     if (!isJumpPressed && playerMain.body.velocity.y < -100) {
         playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.75);
+    }
+
+    if (atkPointerId !== null && !isAttacking) {
+        let elapsed = time - chargeTimer;
+        isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
@@ -402,10 +404,10 @@ function update() {
         playerMain.body.setAccelerationX(0);
         if (isGuarding) playerMain.body.setVelocityX(0);
     }
-
-    // --- 体の揺れ・演出 ---
+    
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
+
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
 
@@ -414,24 +416,35 @@ function update() {
     playerMain.setAngle(leanAngle);
 
     let px = playerMain.x, py = playerMain.y;
-    leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY).setScale(side, 1).setAngle(playerMain.angle);
+    leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
+    leftHand.setScale(side, 1);
+    leftHand.setAngle(playerMain.angle);
 
     if (!isAttacking) {
-        rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY).setAngle(playerMain.angle);
-        sword.setPosition(rightHand.x, rightHand.y).setAngle(playerMain.angle).setScale(side, 1.3);
+        rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
+        rightHand.setAngle(playerMain.angle);
+        sword.setPosition(rightHand.x, rightHand.y);
+        sword.setAngle(playerMain.angle);
+        sword.setScale(side, 1.3);
     } else {
         rightHand.setAngle(0); 
         if (attackType === 'stab' || attackType === 'super_dash') {
             let p = (attackType === 'super_dash') ? 1 : (attackProgress * 2) % 1;
             let thrust = (attackType === 'super_dash') ? 60 : Math.sin(p * Math.PI) * 75;
             rightHand.setPosition(px + ((40 + thrust) * side), py + 18 + totalBounceY);
-            sword.setPosition(rightHand.x, rightHand.y).setAngle(90 * side).setScale(side, attackType === 'super_dash' ? 1.5 : 2.0);
+            sword.setPosition(rightHand.x, rightHand.y);
+            sword.setAngle(90 * side);
+            sword.setScale(side, attackType === 'super_dash' ? 1.5 : 2.0);
         } else if (attackType === 'super_up') {
             rightHand.setPosition(px, py - 80 + totalBounceY);
-            sword.setPosition(rightHand.x, rightHand.y).setAngle(0).setScale(side, 1.8);
+            sword.setPosition(rightHand.x, rightHand.y);
+            sword.setAngle(0);
+            sword.setScale(side, 1.8);
         } else if (attackType === 'super_meteor') {
             rightHand.setPosition(px, py + 80 + totalBounceY);
-            sword.setPosition(rightHand.x, rightHand.y).setAngle(180).setScale(side, 1.8);
+            sword.setPosition(rightHand.x, rightHand.y);
+            sword.setAngle(180);
+            sword.setScale(side, 1.8);
         } else {
             let p = attackProgress;
             let startAng = (attackDir.y < -0.4) ? -150 : (attackDir.y > 0.4 ? 20 : -60);
@@ -440,10 +453,13 @@ function update() {
             let sweepX = Math.cos(Phaser.Math.DegToRad(currentAng)) * 65;
             let sweepY = Math.sin(Phaser.Math.DegToRad(currentAng)) * 65;
             rightHand.setPosition(px + (sweepX * side), py + sweepY + 18 + totalBounceY);
-            sword.setPosition(rightHand.x, rightHand.y).setAngle((currentAng + 90) * side).setScale(side, 1.6);
+            sword.setPosition(rightHand.x, rightHand.y);
+            sword.setAngle((currentAng + 90) * side);
+            sword.setScale(side, 1.6);
         }
     }
 }
+
 function createDustEffect(scene, x, y) {
     const dust = scene.add.circle(x, y + 40, Phaser.Math.Between(4, 10), DUST_COLOR, 0.6);
     dust.setDepth(5);
