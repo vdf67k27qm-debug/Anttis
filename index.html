@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Refined Dodge</title>
+    <title>Scribble Battle - Fixed Dodge Mechanics</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -40,10 +40,10 @@ const SHIELD_SCALE_MIN = 0.8;
 const SHIELD_DECAY = 0.006;     
 const SHIELD_RECOVERY = 0.004;  
 
-const DODGE_DURATION = 350;       
+const DODGE_DURATION = 300;       
 const DODGE_SPEED_GROUND = 2800;
-const DODGE_SPEED_AIR = 700;      // バックステップの勢い
-const DODGE_COOLDOWN = 500;       
+const DODGE_SPEED_AIR = 800;      
+const DODGE_COOLDOWN = 400;       
 const FAST_FALL_SPEED = 800;     
 
 const BOUNCE_AMPLITUDE_MOVE = 4; 
@@ -179,7 +179,7 @@ function create() {
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointerdown', (p) => {
-            if (isDodging) return; // 回避中はUI入力を無視
+            if (isDodging) return; 
             if (airDodgeUsed) {
                 if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
                 return;
@@ -256,7 +256,6 @@ function create() {
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
             if (!playerMain.body.touching.down && !airDodgeUsed) {
-                // 空中回避のトリガー：向きとは逆に設定
                 startDodge(scene, -facingSide, 0, true);
             }
         });
@@ -268,6 +267,10 @@ function create() {
 
 function startDodge(scene, dx, dy, isAir) {
     if (isDodging) return;
+    
+    // 攻撃モーションをキャンセル
+    if (isAttacking) stopAttack();
+    
     isDodging = true;
     isGuarding = false;
     isShieldPressed = false; 
@@ -279,16 +282,15 @@ function startDodge(scene, dx, dy, isAir) {
 
     let speed = isAir ? DODGE_SPEED_AIR : DODGE_SPEED_GROUND;
     let vx = dx * speed;
-    let vy = dy * speed;
-    
-    // 地上回避かつ入力がない場合は前方へ
-    if (!isAir && Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
+    let vy = isAir ? -400 : (dy * speed); // 空中は斜め後ろ上に少し跳ねる
+
+    // 地上回避のデフォルト前方
+    if (!isAir && Math.abs(dx) < 0.1) {
         vx = facingSide * speed;
     }
 
     playerMain.body.setDragX(0);
-    // 空中の場合は重力に従うため、水平速度のみセット。少し浮かせたい場合は vy を負の値にする。
-    playerMain.body.setVelocity(vx, isAir ? -300 : vy * 0.5); 
+    playerMain.body.setVelocity(vx, isAir ? vy : vy * 0.5); 
     playerMain.body.setAcceleration(0, 0);
 
     setAlphaAll(0.5);
@@ -309,6 +311,7 @@ function stopAttack() {
     if (currentTween) currentTween.stop();
     playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800);
     playerMain.body.setDragX(NORMAL_DRAG); 
+    attackProgress = 0;
 }
 
 function startAttack(scene, type, dir = null) {
@@ -381,7 +384,7 @@ function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     let justGuarded = isShieldPressed && !wasShieldPressed;
 
-    // 回避中は移動・ガード・攻撃ロジックへの入力をバイパス
+    // 回避中の入力完全無視ロジック
     if (!isDodging) {
         if (isShieldPressed && isOnGround && !isAttacking) {
             playerMain.body.setAccelerationX(0);
@@ -453,13 +456,16 @@ function update() {
             playerMain.setScale(attackLockedSide, 1); 
         }
     } else {
-        // 回避中：加速は0にするが、物理的な速度(setVelocity)は維持される
+        // 回避中
         playerMain.body.setAccelerationX(0);
+        isGuarding = false;
+        shieldSprite.setAlpha(0);
+        setAlphaAll(0.5);
     }
 
     wasShieldPressed = isShieldPressed;
 
-    // --- 描写ロジック（回避中でも実行してパーツの分離を防ぐ） ---
+    // --- 描写ロジック ---
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
