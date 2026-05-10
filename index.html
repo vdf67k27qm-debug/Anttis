@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Air Dodge Priority</title>
+    <title>Scribble Battle - Refined Mechanics</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -42,7 +42,7 @@ const SHIELD_RECOVERY = 0.004;
 
 const DODGE_DURATION = 300;       
 const DODGE_SPEED_GROUND = 2800;
-const DODGE_SPEED_AIR = 350;      
+const DODGE_SPEED_AIR = 1000;      // 空中バックステップの速度
 const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
@@ -175,6 +175,7 @@ function create() {
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointerdown', (p) => {
+            if (isDodging) return; // 回避中のUI反応も防止
             if (airDodgeUsed) {
                 if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
                 return;
@@ -250,9 +251,9 @@ function create() {
             if (isAttacking || isDodging) return;
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
-            // 空中でガードが押された場合、移動入力があっても無視して空中回避を即座に実行
             if (!playerMain.body.touching.down && !airDodgeUsed) {
-                startDodge(scene, joyInput.x, joyInput.y, true);
+                // 空中回避: キャラクターの向きの逆へ移動
+                startDodge(scene, -facingSide, 0, true);
             }
         });
         btnS.on('pointerup', () => isShieldPressed = false);
@@ -270,18 +271,17 @@ function startDodge(scene, dx, dy, isAir) {
     if (isAir) {
         airDodgeUsed = true;
         canAttackInAir = false; 
-        // 空中回避開始時に現在の移動速度をリセット（回避の発生を明確にするため）
-        playerMain.body.setVelocity(0, 0);
+        playerMain.body.setAllowGravity(false); // 空中回避中は重力無視で直進
     }
 
     let speed = isAir ? DODGE_SPEED_AIR : DODGE_SPEED_GROUND;
     let vx = dx * speed;
     let vy = dy * speed;
-    if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * speed;
+    if (!isAir && Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * speed;
 
     playerMain.body.setDragX(0);
-    playerMain.body.setAcceleration(0, 0); // 回避開始時に加速度を完全に殺す
-    playerMain.body.setVelocity(vx, vy * 0.5);
+    playerMain.body.setVelocity(vx, vy * (isAir ? 0 : 0.5));
+    playerMain.body.setAcceleration(0, 0);
 
     setAlphaAll(0.5);
 
@@ -289,6 +289,7 @@ function startDodge(scene, dx, dy, isAir) {
         isDodging = false;
         setAlphaAll(1.0);
         playerMain.body.setDragX(NORMAL_DRAG);
+        playerMain.body.setAllowGravity(true); // 重力を戻す
         if (playerMain.body.touching.down) {
             playerMain.body.setVelocityX(0);
             lastDodgeTime = scene.time.now;
@@ -362,6 +363,9 @@ function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
 
+    // 回避中の操作完全無視
+    if (isDodging) return; 
+
     if (isOnGround) {
         airDodgeUsed = false;
         canAttackInAir = true;
@@ -373,11 +377,18 @@ function update() {
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     let justGuarded = isShieldPressed && !wasShieldPressed;
 
-    if (isShieldPressed && isOnGround && !isAttacking && !isDodging) {
+    // ガード・回避ロジック
+    if (isShieldPressed && isOnGround && !isAttacking) {
         playerMain.body.setAccelerationX(0);
         playerMain.body.setVelocityX(0);
-        if (justGuarded && Math.abs(moveX) > 0.2) waitingForJoyReset = true;
-        if (Math.abs(moveX) < 0.1) waitingForJoyReset = false;
+        
+        if (justGuarded && Math.abs(moveX) > 0.2) {
+            waitingForJoyReset = true;
+        }
+        if (Math.abs(moveX) < 0.1) {
+            waitingForJoyReset = false;
+        }
+        
         if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
             startDodge(this, moveX > 0 ? 1 : -1, 0, false);
             isGuarding = false;
@@ -402,7 +413,7 @@ function update() {
     } else {
         shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
         shieldSprite.setAlpha(0);
-        if (!isDodging) setAlphaAll(1.0);
+        setAlphaAll(1.0);
     }
 
     if (!isJumpPressed && playerMain.body.velocity.y < -100) {
@@ -414,23 +425,18 @@ function update() {
         isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
     }
 
-    // 移動処理：回避中（isDodging）は入力を完全に無視する
+    // 移動と向きの更新
+    // 回避終了直後にここを通るため、moveXが入っていれば即座に加速が開始される
     if (!isAttacking && !isGuarding) {
-        if (!isDodging) {
-            // 回避中でない時のみ入力を加速度に反映
-            playerMain.body.setDragX(NORMAL_DRAG);
-            if (Math.abs(moveX) > 0.2) {
-                playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-                if (!airDodgeUsed || isOnGround) {
-                    facingSide = moveX < 0 ? -1 : 1;
-                    playerMain.setScale(facingSide, 1);
-                }
-                if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
-            } else {
-                playerMain.body.setAccelerationX(0);
+        playerMain.body.setDragX(NORMAL_DRAG);
+        if (Math.abs(moveX) > 0.2) {
+            playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
+            if (!airDodgeUsed || isOnGround) {
+                facingSide = moveX < 0 ? -1 : 1;
+                playerMain.setScale(facingSide, 1);
             }
+            if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
         } else {
-            // 回避中は加速度を強制的に0にする（左右入力を無視）
             playerMain.body.setAccelerationX(0);
         }
     } else if (isAttacking) {
@@ -446,7 +452,7 @@ function update() {
         playerMain.setScale(attackLockedSide, 1); 
     }
     
-    // --- 描画ロジック ---
+    // 描写ロジック（中略なしで維持）
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
