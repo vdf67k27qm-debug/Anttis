@@ -43,9 +43,9 @@ const SHIELD_RECOVERY = 0.004;
 
 // 回避設定
 const DODGE_DURATION = 300;       
-const DODGE_SPEED_GROUND = 2800;   // バグ抑制のため速度を少し適正化
+const DODGE_SPEED_GROUND = 2800;
 const DODGE_SPEED_AIR = 350;      
-const DODGE_COOLDOWN = 500;       // 地上回避後のインターバル(ms)
+const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
 const BOUNCE_AMPLITUDE_MOVE = 4; 
@@ -76,7 +76,7 @@ let isDodging = false;
 let canAttackInAir = true; 
 let airDodgeUsed = false; 
 let shieldValue = 1.0; 
-let lastDodgeTime = 0; // インターバル管理用
+let lastDodgeTime = 0; 
 
 let attackType = 'slash'; 
 let attackDir = { x: 1, y: 0 };
@@ -173,7 +173,6 @@ function create() {
 
         this.input.on('pointerdown', (p) => {
             if (airDodgeUsed) {
-                // 空中回避後もジャンプボタン付近などは判定を避ける必要があるが、移動は許可
                 if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
                 return;
             }
@@ -246,10 +245,7 @@ function create() {
 
         btnS.on('pointerdown', () => {
             if (isAttacking || isDodging) return;
-            
-            // 地上回避のインターバルチェック
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
-
             isShieldPressed = true;
             if (!playerMain.body.touching.down && !airDodgeUsed) {
                 startDodge(scene, joyInput.x, joyInput.y, true);
@@ -265,6 +261,7 @@ function startDodge(scene, dx, dy, isAir) {
     if (isDodging) return;
     isDodging = true;
     isGuarding = false;
+    isShieldPressed = false; // 回避開始時にガード入力をリセット
     
     if (isAir) {
         airDodgeUsed = true;
@@ -280,7 +277,6 @@ function startDodge(scene, dx, dy, isAir) {
     playerMain.body.setVelocity(vx, vy * 0.5);
     playerMain.body.setAcceleration(0, 0);
 
-    // キャラクター全体・武器も含めて半透明化
     const setAlphaAll = (a) => {
         playerMain.setAlpha(a);
         leftHand.setAlpha(a);
@@ -295,7 +291,7 @@ function startDodge(scene, dx, dy, isAir) {
         playerMain.body.setDragX(NORMAL_DRAG);
         if (playerMain.body.touching.down) {
             playerMain.body.setVelocityX(0);
-            lastDodgeTime = scene.time.now; // インターバル開始
+            lastDodgeTime = scene.time.now;
         }
     });
 }
@@ -371,16 +367,21 @@ function update() {
         canAttackInAir = true;
         jumpCount = 0;
     } else {
-        if (joyInput.y > 0.5) {
-            playerMain.body.setVelocityY(FAST_FALL_SPEED);
-        }
+        if (joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
     }
 
-    // --- ガード優先判定 ---
+    let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
+
+    // --- ガード・回避ロジック修正 ---
     if (isShieldPressed && isOnGround && !isAttacking && !isDodging) {
-        if (Math.abs(joyInput.x) > 0.7) {
-            // 回避への移行
-            startDodge(this, joyInput.x > 0 ? 1 : -1, 0, false);
+        // ガードボタンが押されたらまず静止
+        playerMain.body.setAccelerationX(0);
+        playerMain.body.setVelocityX(0);
+        
+        if (Math.abs(moveX) > 0.5) {
+            // ガード中に一定以上の入力があれば回避へ移行
+            startDodge(this, moveX > 0 ? 1 : -1, 0, false);
+            isGuarding = false;
         } else if (shieldValue > 0.05) { 
             isGuarding = true;
         } else {
@@ -395,9 +396,6 @@ function update() {
         shieldSprite.setAlpha(1.0); 
         let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
         shieldSprite.setScale(s);
-        // ガード中は移動を遮断
-        playerMain.body.setAccelerationX(0);
-        playerMain.body.setVelocityX(0);
     } else {
         shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
         shieldSprite.setAlpha(0);
@@ -412,15 +410,11 @@ function update() {
         isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
     }
 
-    // 入力計算
-    let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-    
     if (!isAttacking && !isGuarding) {
         if (!isDodging) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
                 playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-                // 空中回避後でも左右移動の加速度は許可、向き変更は状況に応じて
                 if (!airDodgeUsed || isOnGround) {
                     facingSide = moveX < 0 ? -1 : 1;
                     playerMain.setScale(facingSide, 1);
@@ -460,9 +454,7 @@ function update() {
     leftHand.setScale(side, 1);
     leftHand.setAngle(playerMain.angle);
 
-    // 回避中の武器複製バグ防止：回避中は武器の更新を完全に止める
-    if (isDodging) return;
-
+    // 武器座標の更新（回避中も実行することで同期させる）
     if (!isAttacking) {
         rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
         rightHand.setAngle(playerMain.angle);
