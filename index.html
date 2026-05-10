@@ -95,6 +95,18 @@ let isJumpPressed = false;
 let isShieldPressed = false; 
 let dustGroup; 
 
+// --- 追加フラグ ---
+let waitingForJoyReset = false; 
+let wasShieldPressed = false; 
+
+// キャラクター全体のアルファ値を設定する関数
+function setAlphaAll(a) {
+    if (playerMain) playerMain.setAlpha(a);
+    if (leftHand) leftHand.setAlpha(a);
+    if (rightHand) rightHand.setAlpha(a);
+    if (sword) sword.setAlpha(a);
+}
+
 function preload() {
     this.load.image('head', 'rabbit_head.png');
     this.load.image('body', 'rabbit_body.png');
@@ -261,7 +273,7 @@ function startDodge(scene, dx, dy, isAir) {
     if (isDodging) return;
     isDodging = true;
     isGuarding = false;
-    isShieldPressed = false; // 回避開始時にガード入力をリセット
+    isShieldPressed = false; 
     
     if (isAir) {
         airDodgeUsed = true;
@@ -277,12 +289,6 @@ function startDodge(scene, dx, dy, isAir) {
     playerMain.body.setVelocity(vx, vy * 0.5);
     playerMain.body.setAcceleration(0, 0);
 
-    const setAlphaAll = (a) => {
-        playerMain.setAlpha(a);
-        leftHand.setAlpha(a);
-        rightHand.setAlpha(a);
-        sword.setAlpha(a);
-    };
     setAlphaAll(0.5);
 
     scene.time.delayedCall(DODGE_DURATION, () => {
@@ -371,6 +377,7 @@ function update() {
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
+    let justGuarded = isShieldPressed && !wasShieldPressed;
 
     // --- ガード・回避ロジック修正 ---
     if (isShieldPressed && isOnGround && !isAttacking && !isDodging) {
@@ -378,8 +385,18 @@ function update() {
         playerMain.body.setAccelerationX(0);
         playerMain.body.setVelocityX(0);
         
-        if (Math.abs(moveX) > 0.5) {
-            // ガード中に一定以上の入力があれば回避へ移行
+        // 移動入力中にガードが押された場合、入力を一旦リセットするまで無視する
+        if (justGuarded && Math.abs(moveX) > 0.2) {
+            waitingForJoyReset = true;
+        }
+
+        // ジョイスティックから指が離れる（入力がなくなる）とリセット待ち解除
+        if (Math.abs(moveX) < 0.1) {
+            waitingForJoyReset = false;
+        }
+        
+        if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
+            // ガード中に一定以上の再入力があれば回避へ移行
             startDodge(this, moveX > 0 ? 1 : -1, 0, false);
             isGuarding = false;
         } else if (shieldValue > 0.05) { 
@@ -389,16 +406,23 @@ function update() {
         }
     } else {
         isGuarding = false;
+        waitingForJoyReset = false; // ガードしていない時はリセット
     }
+
+    wasShieldPressed = isShieldPressed;
 
     if (isGuarding) {
         shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
         shieldSprite.setAlpha(1.0); 
         let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
         shieldSprite.setScale(s);
+        setAlphaAll(0.5); // ガード時半透明化
     } else {
         shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
         shieldSprite.setAlpha(0);
+        if (!isDodging) {
+            setAlphaAll(1.0); // 回避中でなければ透明度を元に戻す
+        }
     }
 
     if (!isJumpPressed && playerMain.body.velocity.y < -100) {
@@ -454,7 +478,6 @@ function update() {
     leftHand.setScale(side, 1);
     leftHand.setAngle(playerMain.angle);
 
-    // 武器座標の更新（回避中も実行することで同期させる）
     if (!isAttacking) {
         rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
         rightHand.setAngle(playerMain.angle);
