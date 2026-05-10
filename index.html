@@ -259,7 +259,7 @@ function create() {
             if (isAttacking || isDodging) return;
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
-            // 空中かつ移動中、またはガードボタンが押された瞬間の空中回避判定
+            // 空中であれば即座に回避を実行
             if (!playerMain.body.touching.down && !airDodgeUsed) {
                 startDodge(scene, joyInput.x, joyInput.y, true);
             }
@@ -383,7 +383,7 @@ function update() {
     // --- ガード・回避ロジック修正 ---
     if (isShieldPressed && !isAttacking && !isDodging) {
         if (isOnGround) {
-            // 地上：ガード優先（静止）
+            // 地上：ガードボタンが押されたらまず静止
             playerMain.body.setAccelerationX(0);
             playerMain.body.setVelocityX(0);
             
@@ -402,15 +402,10 @@ function update() {
             } else {
                 isGuarding = false;
             }
-        } else {
-            // 空中：移動入力があれば即座に回避を実行
-            if (!airDodgeUsed && Math.abs(moveX) > 0.1) {
-                startDodge(this, moveX > 0 ? 1 : -1, joyInput.y, true);
-                isGuarding = false;
-            } else {
-                isGuarding = false; // 空中では移動入力なしのガード不可
-            }
-            waitingForJoyReset = false;
+        } else if (!airDodgeUsed) {
+            // 空中：移動入力があっても無視し、即座に回避を実行
+            playerMain.body.setAccelerationX(0);
+            startDodge(this, joyInput.x, joyInput.y, true);
         }
     } else {
         isGuarding = false;
@@ -443,7 +438,8 @@ function update() {
     }
 
     if (!isAttacking && !isGuarding) {
-        if (!isDodging) {
+        // 回避中または空中でガードボタンが押されている場合は入力を無視
+        if (!isDodging && !(isShieldPressed && !isOnGround)) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
                 playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
