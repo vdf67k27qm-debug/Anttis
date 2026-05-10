@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scribble Battle - Refined Mechanics</title>
+    <title>Scribble Battle - Refined Dodge</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
@@ -40,9 +40,9 @@ const SHIELD_SCALE_MIN = 0.8;
 const SHIELD_DECAY = 0.006;     
 const SHIELD_RECOVERY = 0.004;  
 
-const DODGE_DURATION = 300;       
+const DODGE_DURATION = 350;       
 const DODGE_SPEED_GROUND = 2800;
-const DODGE_SPEED_AIR = 1000;      // 空中バックステップの速度
+const DODGE_SPEED_AIR = 700;      // バックステップの勢い
 const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
@@ -127,7 +127,11 @@ function create() {
     playerMain = this.add.container(400, 600);
     body = this.add.sprite(0, 8, 'body');
     head = this.add.sprite(0, -24, 'head');
-    shieldSprite = this.add.sprite(0, 0, 'shield').setAlpha(0).setTint(0x88ccff);
+    
+    shieldSprite = this.add.sprite(0, 0, 'shield');
+    shieldSprite.setAlpha(0); 
+    shieldSprite.setTint(0x88ccff);
+    
     playerMain.add([body, head, shieldSprite]);
     playerMain.setDepth(11);
 
@@ -175,7 +179,7 @@ function create() {
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointerdown', (p) => {
-            if (isDodging) return; // 回避中のUI反応も防止
+            if (isDodging) return; // 回避中はUI入力を無視
             if (airDodgeUsed) {
                 if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
                 return;
@@ -252,7 +256,7 @@ function create() {
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
             if (!playerMain.body.touching.down && !airDodgeUsed) {
-                // 空中回避: キャラクターの向きの逆へ移動
+                // 空中回避のトリガー：向きとは逆に設定
                 startDodge(scene, -facingSide, 0, true);
             }
         });
@@ -271,16 +275,20 @@ function startDodge(scene, dx, dy, isAir) {
     if (isAir) {
         airDodgeUsed = true;
         canAttackInAir = false; 
-        playerMain.body.setAllowGravity(false); // 空中回避中は重力無視で直進
     }
 
     let speed = isAir ? DODGE_SPEED_AIR : DODGE_SPEED_GROUND;
     let vx = dx * speed;
     let vy = dy * speed;
-    if (!isAir && Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * speed;
+    
+    // 地上回避かつ入力がない場合は前方へ
+    if (!isAir && Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
+        vx = facingSide * speed;
+    }
 
     playerMain.body.setDragX(0);
-    playerMain.body.setVelocity(vx, vy * (isAir ? 0 : 0.5));
+    // 空中の場合は重力に従うため、水平速度のみセット。少し浮かせたい場合は vy を負の値にする。
+    playerMain.body.setVelocity(vx, isAir ? -300 : vy * 0.5); 
     playerMain.body.setAcceleration(0, 0);
 
     setAlphaAll(0.5);
@@ -289,7 +297,6 @@ function startDodge(scene, dx, dy, isAir) {
         isDodging = false;
         setAlphaAll(1.0);
         playerMain.body.setDragX(NORMAL_DRAG);
-        playerMain.body.setAllowGravity(true); // 重力を戻す
         if (playerMain.body.touching.down) {
             playerMain.body.setVelocityX(0);
             lastDodgeTime = scene.time.now;
@@ -363,96 +370,96 @@ function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
 
-    // 回避中の操作完全無視
-    if (isDodging) return; 
-
     if (isOnGround) {
         airDodgeUsed = false;
         canAttackInAir = true;
         jumpCount = 0;
     } else {
-        if (joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
+        if (!isDodging && joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
     let justGuarded = isShieldPressed && !wasShieldPressed;
 
-    // ガード・回避ロジック
-    if (isShieldPressed && isOnGround && !isAttacking) {
-        playerMain.body.setAccelerationX(0);
-        playerMain.body.setVelocityX(0);
-        
-        if (justGuarded && Math.abs(moveX) > 0.2) {
-            waitingForJoyReset = true;
-        }
-        if (Math.abs(moveX) < 0.1) {
-            waitingForJoyReset = false;
-        }
-        
-        if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
-            startDodge(this, moveX > 0 ? 1 : -1, 0, false);
-            isGuarding = false;
-        } else if (shieldValue > 0.05) { 
-            isGuarding = true;
+    // 回避中は移動・ガード・攻撃ロジックへの入力をバイパス
+    if (!isDodging) {
+        if (isShieldPressed && isOnGround && !isAttacking) {
+            playerMain.body.setAccelerationX(0);
+            playerMain.body.setVelocityX(0);
+            
+            if (justGuarded && Math.abs(moveX) > 0.2) {
+                waitingForJoyReset = true;
+            }
+            if (Math.abs(moveX) < 0.1) {
+                waitingForJoyReset = false;
+            }
+            
+            if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
+                startDodge(this, moveX > 0 ? 1 : -1, 0, false);
+                isGuarding = false;
+            } else if (shieldValue > 0.05) { 
+                isGuarding = true;
+            } else {
+                isGuarding = false;
+            }
         } else {
             isGuarding = false;
+            waitingForJoyReset = false;
+        }
+
+        if (isGuarding) {
+            shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
+            shieldSprite.setAlpha(1.0); 
+            let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
+            shieldSprite.setScale(s);
+            setAlphaAll(0.5);
+        } else {
+            shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
+            shieldSprite.setAlpha(0);
+            setAlphaAll(1.0);
+        }
+
+        if (!isJumpPressed && playerMain.body.velocity.y < -100) {
+            playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.9); 
+        }
+
+        if (atkPointerId !== null && !isAttacking) {
+            let elapsed = time - chargeTimer;
+            isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
+        }
+
+        if (!isAttacking && !isGuarding) {
+            playerMain.body.setDragX(NORMAL_DRAG);
+            if (Math.abs(moveX) > 0.2) {
+                playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
+                if (!airDodgeUsed || isOnGround) {
+                    facingSide = moveX < 0 ? -1 : 1;
+                    playerMain.setScale(facingSide, 1);
+                }
+                if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
+            } else {
+                playerMain.body.setAccelerationX(0);
+            }
+        } else if (isAttacking) {
+            if (attackType === 'super_up' || attackType === 'super_meteor') {
+                playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
+                if (Math.abs(moveX) > 0.2) {
+                    facingSide = moveX < 0 ? -1 : 1;
+                    attackLockedSide = facingSide; 
+                }
+            } else {
+                playerMain.body.setAccelerationX(0);
+            }
+            playerMain.setScale(attackLockedSide, 1); 
         }
     } else {
-        isGuarding = false;
-        waitingForJoyReset = false;
+        // 回避中：加速は0にするが、物理的な速度(setVelocity)は維持される
+        playerMain.body.setAccelerationX(0);
     }
 
     wasShieldPressed = isShieldPressed;
 
-    if (isGuarding) {
-        shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
-        shieldSprite.setAlpha(1.0); 
-        let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
-        shieldSprite.setScale(s);
-        setAlphaAll(0.5);
-    } else {
-        shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
-        shieldSprite.setAlpha(0);
-        setAlphaAll(1.0);
-    }
-
-    if (!isJumpPressed && playerMain.body.velocity.y < -100) {
-        playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.9); 
-    }
-
-    if (atkPointerId !== null && !isAttacking) {
-        let elapsed = time - chargeTimer;
-        isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
-    }
-
-    // 移動と向きの更新
-    // 回避終了直後にここを通るため、moveXが入っていれば即座に加速が開始される
-    if (!isAttacking && !isGuarding) {
-        playerMain.body.setDragX(NORMAL_DRAG);
-        if (Math.abs(moveX) > 0.2) {
-            playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-            if (!airDodgeUsed || isOnGround) {
-                facingSide = moveX < 0 ? -1 : 1;
-                playerMain.setScale(facingSide, 1);
-            }
-            if (isOnGround && time % 5 === 0) createDustEffect(this, playerMain.x, playerMain.y);
-        } else {
-            playerMain.body.setAccelerationX(0);
-        }
-    } else if (isAttacking) {
-        if (attackType === 'super_up' || attackType === 'super_meteor') {
-            playerMain.body.setAccelerationX(moveX * NORMAL_MOVE_ACCEL);
-            if (Math.abs(moveX) > 0.2) {
-                facingSide = moveX < 0 ? -1 : 1;
-                attackLockedSide = facingSide; 
-            }
-        } else {
-            playerMain.body.setAccelerationX(0);
-        }
-        playerMain.setScale(attackLockedSide, 1); 
-    }
-    
-    // 描写ロジック（中略なしで維持）
+    // --- 描写ロジック（回避中でも実行してパーツの分離を防ぐ） ---
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
