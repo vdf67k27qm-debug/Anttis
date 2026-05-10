@@ -42,9 +42,9 @@ const SHIELD_DECAY = 0.006;
 const SHIELD_RECOVERY = 0.004;  
 
 // 回避設定
-const DODGE_DURATION = 300;       
-const DODGE_SPEED_GROUND = 2800;
-const DODGE_SPEED_AIR = 800;      // 空中バックステップの水平初速
+const DODGE_DURATION = 350;       
+const DODGE_SPEED_AIR_H = 600;    // 空中回避の水平速度
+const DODGE_SPEED_AIR_V = -500;   // 空中回避の垂直初速
 const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
@@ -95,10 +95,6 @@ let isJumpPressed = false;
 let isShieldPressed = false; 
 let dustGroup; 
 
-// --- 追加フラグ ---
-let waitingForJoyReset = false; 
-let wasShieldPressed = false; 
-
 // キャラクター全体のアルファ値を設定する関数
 function setAlphaAll(a) {
     if (playerMain) playerMain.setAlpha(a);
@@ -143,7 +139,7 @@ function create() {
     this.physics.world.enable(playerMain);
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(NORMAL_DRAG); 
-    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800); 
+    playerMain.body.setMaxVelocity(800, 1800); // 最大速度を少し緩和して空中回避をスムーズに
     playerMain.body.setSize(50, 85);
     playerMain.body.setOffset(-25, -42);
 
@@ -184,7 +180,7 @@ function create() {
         this.add.text(atkX - 40, uiY - 75, 'SHIELD', {fontSize:'10px', color:'#000', fontWeight:'bold'}).setOrigin(0.5).setScrollFactor(0).setDepth(101);
 
         this.input.on('pointerdown', (p) => {
-            if (isDodging) return; // 回避中はUI入力を無視
+            if (isDodging) return;
             if (airDodgeUsed) {
                 if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
                 return;
@@ -258,11 +254,10 @@ function create() {
 
         btnS.on('pointerdown', () => {
             if (isAttacking || isDodging) return;
-            if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
+            // 空中回避の判定
             if (!playerMain.body.touching.down && !airDodgeUsed) {
-                // 空中回避：方向指定に関わらず、向きと逆に跳ぶ
-                startDodge(scene, 0, 0, true);
+                startDodge(scene);
             }
         });
         btnS.on('pointerup', () => isShieldPressed = false);
@@ -271,29 +266,18 @@ function create() {
     this.cursors = this.input.keyboard.createCursorKeys();
 }
 
-function startDodge(scene, dx, dy, isAir) {
+function startDodge(scene) {
     if (isDodging) return;
     isDodging = true;
     isGuarding = false;
     isShieldPressed = false; 
     
-    if (isAir) {
-        airDodgeUsed = true;
-        canAttackInAir = false; 
-    }
+    airDodgeUsed = true;
+    canAttackInAir = false; 
 
-    let vx, vy;
-    if (isAir) {
-        // 空中回避：キャラクターの向きと逆に斜め後ろへ（重力に任せる）
-        vx = -facingSide * DODGE_SPEED_AIR;
-        vy = -500; // 最初に少し上に跳ねる
-    } else {
-        // 地上回避：従来通り、入力方向（なければ前方）へ
-        let speed = DODGE_SPEED_GROUND;
-        vx = dx * speed;
-        vy = dy * speed;
-        if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) vx = facingSide * speed;
-    }
+    // 向いている方向と逆に斜め後ろへ跳ぶ
+    let vx = -facingSide * DODGE_SPEED_AIR_H;
+    let vy = DODGE_SPEED_AIR_V;
 
     playerMain.body.setDragX(0);
     playerMain.body.setVelocity(vx, vy);
@@ -305,10 +289,7 @@ function startDodge(scene, dx, dy, isAir) {
         isDodging = false;
         setAlphaAll(1.0);
         playerMain.body.setDragX(NORMAL_DRAG);
-        if (playerMain.body.touching.down) {
-            playerMain.body.setVelocityX(0);
-            lastDodgeTime = scene.time.now;
-        }
+        // 回避終了後の物理的な減衰を考慮し、ここでは速度をリセットせず重力とドラッグに任せる
     });
 }
 
@@ -383,38 +364,32 @@ function update() {
         canAttackInAir = true;
         jumpCount = 0;
     } else {
+        // 空中回避中でない場合のみ急降下を許可
         if (!isDodging && joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-    let justGuarded = isShieldPressed && !wasShieldPressed;
 
-    // 回避中ではない場合のみ各種操作を受け付ける
-    if (!isDodging) {
+    // --- ガード・回避ロジック（修正） ---
+    // 回避中はいかなる操作も無視
+    if (isDodging) {
+        playerMain.body.setAccelerationX(0);
+    } else {
+        // 地上でのガード処理（回避移行を削除）
         if (isShieldPressed && isOnGround && !isAttacking) {
             playerMain.body.setAccelerationX(0);
             playerMain.body.setVelocityX(0);
             
-            if (justGuarded && Math.abs(moveX) > 0.2) {
-                waitingForJoyReset = true;
-            }
-            if (Math.abs(moveX) < 0.1) {
-                waitingForJoyReset = false;
-            }
-            
-            if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
-                startDodge(this, moveX > 0 ? 1 : -1, 0, false);
-                isGuarding = false;
-            } else if (shieldValue > 0.05) { 
+            if (shieldValue > 0.05) { 
                 isGuarding = true;
             } else {
                 isGuarding = false;
             }
         } else {
             isGuarding = false;
-            waitingForJoyReset = false;
         }
 
+        // ガード演出
         if (isGuarding) {
             shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
             shieldSprite.setAlpha(1.0); 
@@ -436,6 +411,7 @@ function update() {
             isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
         }
 
+        // 通常移動処理（回避終了後はここが即座に動く）
         if (!isAttacking && !isGuarding) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
@@ -460,14 +436,9 @@ function update() {
             }
             playerMain.setScale(attackLockedSide, 1); 
         }
-    } else {
-        // 回避中は加速を停止（慣性移動のみ）
-        playerMain.body.setAccelerationX(0);
     }
-
-    wasShieldPressed = isShieldPressed;
-
-    // --- 描写ロジック（回避中も座標を同期させ、パーツが離れないようにする） ---
+    
+    // --- 描写ロジック（回避中も常に更新） ---
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
