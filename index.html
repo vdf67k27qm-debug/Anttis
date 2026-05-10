@@ -23,7 +23,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 
 // --- 調整用パラメータ定数 ---
 const CHARGE_TIME_THRESHOLD = 250; 
-const NORMAL_MOVE_ACCEL = 1800;
+const NORMAL_MOVE_ACCEL = 2200;
 const NORMAL_MAX_VELOCITY = 400;
 const NORMAL_DRAG = 3500;
 const JUMP_VELOCITY_MAX = -1350; 
@@ -38,13 +38,13 @@ const DUST_COLOR = 0xd2b48c;
 // ガード・回避用定数
 const SHIELD_SCALE_MAX = 1.7;   
 const SHIELD_SCALE_MIN = 0.8;   
-const SHIELD_DECAY = 0.008;     
+const SHIELD_DECAY = 0.006;     
 const SHIELD_RECOVERY = 0.004;  
 
 // 回避設定
 const DODGE_DURATION = 350;       
-const DODGE_SPEED_AIR_H = 500;    // 空中回避の水平速度
-const DODGE_SPEED_AIR_V = -200;   // 空中回避の垂直初速
+const DODGE_SPEED_AIR_H = 600;    // 空中回避の水平速度
+const DODGE_SPEED_AIR_V = -500;   // 空中回避の垂直初速
 const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
@@ -95,7 +95,6 @@ let isJumpPressed = false;
 let isShieldPressed = false; 
 let dustGroup; 
 
-// キャラクター全体のアルファ値を設定する関数
 function setAlphaAll(a) {
     if (playerMain) playerMain.setAlpha(a);
     if (leftHand) leftHand.setAlpha(a);
@@ -139,7 +138,8 @@ function create() {
     this.physics.world.enable(playerMain);
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(NORMAL_DRAG); 
-    playerMain.body.setMaxVelocity(800, 1800); // 最大速度を少し緩和して空中回避をスムーズに
+    // 開始時の最大速度をNORMAL_MAX_VELOCITYに修正
+    playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800); 
     playerMain.body.setSize(50, 85);
     playerMain.body.setOffset(-25, -42);
 
@@ -205,6 +205,7 @@ function create() {
             if (p.id === atkPointerId && !airDodgeUsed) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
+                atkStick.setPosition(atkX, uiY); 
                 atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 atkJoyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
@@ -255,7 +256,6 @@ function create() {
         btnS.on('pointerdown', () => {
             if (isAttacking || isDodging) return;
             isShieldPressed = true;
-            // 空中回避の判定
             if (!playerMain.body.touching.down && !airDodgeUsed) {
                 startDodge(scene);
             }
@@ -275,7 +275,6 @@ function startDodge(scene) {
     airDodgeUsed = true;
     canAttackInAir = false; 
 
-    // 向いている方向と逆に斜め後ろへ跳ぶ
     let vx = -facingSide * DODGE_SPEED_AIR_H;
     let vy = DODGE_SPEED_AIR_V;
 
@@ -289,7 +288,6 @@ function startDodge(scene) {
         isDodging = false;
         setAlphaAll(1.0);
         playerMain.body.setDragX(NORMAL_DRAG);
-        // 回避終了後の物理的な減衰を考慮し、ここでは速度をリセットせず重力とドラッグに任せる
     });
 }
 
@@ -364,32 +362,23 @@ function update() {
         canAttackInAir = true;
         jumpCount = 0;
     } else {
-        // 空中回避中でない場合のみ急降下を許可
         if (!isDodging && joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
     }
 
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
 
-    // --- ガード・回避ロジック（修正） ---
-    // 回避中はいかなる操作も無視
     if (isDodging) {
         playerMain.body.setAccelerationX(0);
     } else {
-        // 地上でのガード処理（回避移行を削除）
         if (isShieldPressed && isOnGround && !isAttacking) {
             playerMain.body.setAccelerationX(0);
             playerMain.body.setVelocityX(0);
-            
-            if (shieldValue > 0.05) { 
-                isGuarding = true;
-            } else {
-                isGuarding = false;
-            }
+            if (shieldValue > 0.05) isGuarding = true;
+            else isGuarding = false;
         } else {
             isGuarding = false;
         }
 
-        // ガード演出
         if (isGuarding) {
             shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
             shieldSprite.setAlpha(1.0); 
@@ -411,7 +400,6 @@ function update() {
             isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
         }
 
-        // 通常移動処理（回避終了後はここが即座に動く）
         if (!isAttacking && !isGuarding) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
@@ -438,7 +426,6 @@ function update() {
         }
     }
     
-    // --- 描写ロジック（回避中も常に更新） ---
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
