@@ -259,6 +259,7 @@ function create() {
             if (isAttacking || isDodging) return;
             if (playerMain.body.touching.down && scene.time.now - lastDodgeTime < DODGE_COOLDOWN) return;
             isShieldPressed = true;
+            // 空中かつ移動中、またはガードボタンが押された瞬間の空中回避判定
             if (!playerMain.body.touching.down && !airDodgeUsed) {
                 startDodge(scene, joyInput.x, joyInput.y, true);
             }
@@ -380,33 +381,40 @@ function update() {
     let justGuarded = isShieldPressed && !wasShieldPressed;
 
     // --- ガード・回避ロジック修正 ---
-    if (isShieldPressed && isOnGround && !isAttacking && !isDodging) {
-        // ガードボタンが押されたらまず静止
-        playerMain.body.setAccelerationX(0);
-        playerMain.body.setVelocityX(0);
-        
-        // 移動入力中にガードが押された場合、入力を一旦リセットするまで無視する
-        if (justGuarded && Math.abs(moveX) > 0.2) {
-            waitingForJoyReset = true;
-        }
-
-        // ジョイスティックから指が離れる（入力がなくなる）とリセット待ち解除
-        if (Math.abs(moveX) < 0.1) {
-            waitingForJoyReset = false;
-        }
-        
-        if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
-            // ガード中に一定以上の再入力があれば回避へ移行
-            startDodge(this, moveX > 0 ? 1 : -1, 0, false);
-            isGuarding = false;
-        } else if (shieldValue > 0.05) { 
-            isGuarding = true;
+    if (isShieldPressed && !isAttacking && !isDodging) {
+        if (isOnGround) {
+            // 地上：ガード優先（静止）
+            playerMain.body.setAccelerationX(0);
+            playerMain.body.setVelocityX(0);
+            
+            if (justGuarded && Math.abs(moveX) > 0.2) {
+                waitingForJoyReset = true;
+            }
+            if (Math.abs(moveX) < 0.1) {
+                waitingForJoyReset = false;
+            }
+            
+            if (Math.abs(moveX) > 0.5 && !waitingForJoyReset) {
+                startDodge(this, moveX > 0 ? 1 : -1, 0, false);
+                isGuarding = false;
+            } else if (shieldValue > 0.05) { 
+                isGuarding = true;
+            } else {
+                isGuarding = false;
+            }
         } else {
-            isGuarding = false;
+            // 空中：移動入力があれば即座に回避を実行
+            if (!airDodgeUsed && Math.abs(moveX) > 0.1) {
+                startDodge(this, moveX > 0 ? 1 : -1, joyInput.y, true);
+                isGuarding = false;
+            } else {
+                isGuarding = false; // 空中では移動入力なしのガード不可
+            }
+            waitingForJoyReset = false;
         }
     } else {
         isGuarding = false;
-        waitingForJoyReset = false; // ガードしていない時はリセット
+        waitingForJoyReset = false; 
     }
 
     wasShieldPressed = isShieldPressed;
@@ -416,12 +424,12 @@ function update() {
         shieldSprite.setAlpha(1.0); 
         let s = SHIELD_SCALE_MIN + (shieldValue * (SHIELD_SCALE_MAX - SHIELD_SCALE_MIN));
         shieldSprite.setScale(s);
-        setAlphaAll(0.5); // ガード時半透明化
+        setAlphaAll(0.5); 
     } else {
         shieldValue = Math.min(1.0, shieldValue + SHIELD_RECOVERY);
         shieldSprite.setAlpha(0);
         if (!isDodging) {
-            setAlphaAll(1.0); // 回避中でなければ透明度を元に戻す
+            setAlphaAll(1.0); 
         }
     }
 
