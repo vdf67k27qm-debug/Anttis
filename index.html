@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Scribble Battle - Refined Mechanics</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
@@ -13,7 +13,14 @@
             outline: none;
             -webkit-tap-highlight-color: rgba(0,0,0,0);
         }
-        body { margin: 0; background-color: #333; touch-action: none; overflow: hidden; }
+        body { 
+            margin: 0; 
+            background-color: #333; 
+            touch-action: none; 
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
         canvas { display: block; margin: 0 auto; touch-action: none; }
     </style>
 </head>
@@ -35,16 +42,14 @@ const METEOR_SPEED = 1300;
 const ATTACK_RECOIL = 200; 
 const DUST_COLOR = 0xd2b48c; 
 
-// ガード・回避用定数
 const SHIELD_SCALE_MAX = 1.7;   
 const SHIELD_SCALE_MIN = 0.8;   
 const SHIELD_DECAY = 0.006;     
 const SHIELD_RECOVERY = 0.004;  
 
-// 回避設定
 const DODGE_DURATION = 350;       
-const DODGE_SPEED_AIR_H = 500;    // 空中回避の水平速度
-const DODGE_SPEED_AIR_V = -200;   // 空中回避の垂直初速
+const DODGE_SPEED_AIR_H = 500;    
+const DODGE_SPEED_AIR_V = -200;   
 const DODGE_COOLDOWN = 500;       
 const FAST_FALL_SPEED = 800;     
 
@@ -57,7 +62,11 @@ const config = {
     width: 800,
     height: 600,
     backgroundColor: '#ffffff',
-    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scale: { 
+        mode: Phaser.Scale.FIT, 
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        parent: document.body
+    },
     physics: {
         default: 'arcade',
         arcade: { gravity: { y: 2600 }, debug: false, overlapBias: 64 }
@@ -138,7 +147,6 @@ function create() {
     this.physics.world.enable(playerMain);
     playerMain.body.setCollideWorldBounds(true);
     playerMain.body.setDragX(NORMAL_DRAG); 
-    // 開始時の最大速度をNORMAL_MAX_VELOCITYに修正
     playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, 1800); 
     playerMain.body.setSize(50, 85);
     playerMain.body.setOffset(-25, -42);
@@ -167,7 +175,10 @@ function create() {
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
     const setupUI = () => {
-        const uiY = 510, joyX = 110, atkX = 690, radius = 45;
+        const sw = scene.scale.width;
+        const sh = scene.scale.height;
+        const joyX = 110, atkX = sw - 110, uiY = sh - 90, radius = 45;
+
         this.add.circle(joyX, uiY, radius, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
         const joyStick = this.add.circle(joyX, uiY, 20, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
         this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
@@ -181,17 +192,16 @@ function create() {
 
         this.input.on('pointerdown', (p) => {
             if (isDodging) return;
-            if (airDodgeUsed) {
-                if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
-                return;
-            }
             if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 95, uiY + 10) < 35) return;
             if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 40, uiY - 75) < 35) return;
-            if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 20) movePointerId = p.id;
-            if (Phaser.Math.Distance.Between(p.x, p.y, atkX, uiY) < radius) {
-                atkPointerId = p.id;
-                chargeTimer = scene.time.now;
-                isCharging = false;
+
+            if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 40) movePointerId = p.id;
+            else if (Phaser.Math.Distance.Between(p.x, p.y, atkX, uiY) < radius + 20) {
+                if (!airDodgeUsed) {
+                    atkPointerId = p.id;
+                    chargeTimer = scene.time.now;
+                    isCharging = false;
+                }
             }
         });
 
@@ -202,10 +212,9 @@ function create() {
                 joyStick.setPosition(joyX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 joyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
-            if (p.id === atkPointerId && !airDodgeUsed) {
+            if (p.id === atkPointerId) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
-                atkStick.setPosition(atkX, uiY); 
                 atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 atkJoyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
@@ -271,19 +280,14 @@ function startDodge(scene) {
     isDodging = true;
     isGuarding = false;
     isShieldPressed = false; 
-    
     airDodgeUsed = true;
     canAttackInAir = false; 
-
     let vx = -facingSide * DODGE_SPEED_AIR_H;
     let vy = DODGE_SPEED_AIR_V;
-
     playerMain.body.setDragX(0);
     playerMain.body.setVelocity(vx, vy);
     playerMain.body.setAcceleration(0, 0);
-
     setAlphaAll(0.5);
-
     scene.time.delayedCall(DODGE_DURATION, () => {
         isDodging = false;
         setAlphaAll(1.0);
@@ -300,24 +304,19 @@ function stopAttack() {
 
 function startAttack(scene, type, dir = null) {
     if (isAttacking || isGuarding || isDodging || !canAttackInAir || airDodgeUsed) return;
-    
     isAttacking = true;
     attackType = type;
     attackProgress = 0;
     attackLockedSide = facingSide;
-
     if (dir && Math.abs(dir.x) > 0.5) {
         attackLockedSide = dir.x > 0 ? 1 : -1;
         facingSide = attackLockedSide;
     }
-    
     playerMain.setScale(facingSide, 1);
     attackDir = { x: dir ? dir.x : 0, y: dir ? dir.y : 0 };
-
     if (!playerMain.body.touching.down && (type === 'slash' || type === 'stab')) {
         playerMain.body.setDragX(0);
     }
-
     let duration = 150;
     if (type === 'stab') duration = 250;
     if (type === 'super_dash') {
@@ -333,7 +332,6 @@ function startAttack(scene, type, dir = null) {
         duration = 3000;
         playerMain.body.setMaxVelocity(NORMAL_MAX_VELOCITY, METEOR_SPEED);
     }
-
     currentTween = scene.tweens.add({
         targets: { val: 0 },
         val: 1,
@@ -356,7 +354,6 @@ function startAttack(scene, type, dir = null) {
 function update() {
     let time = this.time.now;
     let isOnGround = playerMain.body.touching.down;
-
     if (isOnGround) {
         airDodgeUsed = false;
         canAttackInAir = true;
@@ -364,9 +361,7 @@ function update() {
     } else {
         if (!isDodging && joyInput.y > 0.5) playerMain.body.setVelocityY(FAST_FALL_SPEED);
     }
-
     let moveX = (this.cursors.left.isDown ? -1 : (this.cursors.right.isDown ? 1 : joyInput.x));
-
     if (isDodging) {
         playerMain.body.setAccelerationX(0);
     } else {
@@ -378,7 +373,6 @@ function update() {
         } else {
             isGuarding = false;
         }
-
         if (isGuarding) {
             shieldValue = Math.max(0, shieldValue - SHIELD_DECAY);
             shieldSprite.setAlpha(1.0); 
@@ -390,16 +384,13 @@ function update() {
             shieldSprite.setAlpha(0);
             setAlphaAll(1.0);
         }
-
         if (!isJumpPressed && playerMain.body.velocity.y < -100) {
             playerMain.body.setVelocityY(playerMain.body.velocity.y * 0.9); 
         }
-
         if (atkPointerId !== null && !isAttacking) {
             let elapsed = time - chargeTimer;
             isCharging = (elapsed >= CHARGE_TIME_THRESHOLD);
         }
-
         if (!isAttacking && !isGuarding) {
             playerMain.body.setDragX(NORMAL_DRAG);
             if (Math.abs(moveX) > 0.2) {
@@ -425,21 +416,17 @@ function update() {
             playerMain.setScale(attackLockedSide, 1); 
         }
     }
-    
     let isMoving = Math.abs(playerMain.body.velocity.x) > 20;
     let side = isAttacking ? attackLockedSide : facingSide;
     let totalBounceY = (!isOnGround) ? -4 : (isMoving ? Math.sin(time / 100) * BOUNCE_AMPLITUDE_MOVE : Math.sin(time / 350) * BOUNCE_AMPLITUDE_IDLE);
     let leanAngle = isMoving ? (playerMain.body.velocity.x / NORMAL_MAX_VELOCITY) * 12 : 0;
-
     body.y = 8 + totalBounceY;
     head.y = -24 + totalBounceY;
     playerMain.setAngle(leanAngle);
-
     let px = playerMain.x, py = playerMain.y;
     leftHand.setPosition(px - (40 * side), py + 18 + totalBounceY);
     leftHand.setScale(side, 1);
     leftHand.setAngle(playerMain.angle);
-
     if (!isAttacking) {
         rightHand.setPosition(px + (40 * side), py + 18 + totalBounceY);
         rightHand.setAngle(playerMain.angle);
