@@ -3,228 +3,444 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>iPad Pro Map Editor - Bottom UI</title>
+    <title>Warfield Map Editor - Final Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-        body { margin: 0; background: #1a1a1a; overflow: hidden; touch-action: none; }
+        body { margin: 0; background: #000; overflow: hidden; touch-action: none; }
         canvas { display: block; touch-action: none; }
     </style>
 </head>
 <body>
 <script>
-// --- 設定 ---
-const TILE_SIZE = 64;
-const MAP_WIDTH = 60;
-const MAP_HEIGHT = 20;
+// --- マップ・エディタ設定 ---
+const TILE_SIZE = 64; // グリッドのサイズ
+const MAP_WIDTH = 50;  // 横幅（タイル数）
+const MAP_HEIGHT = 15; // 縦幅（タイル数）
 const WORLD_W = MAP_WIDTH * TILE_SIZE;
 const WORLD_H = MAP_HEIGHT * TILE_SIZE;
 
+// 1:土台, 2:足場, 3:背景草
+const MAP_TYPES = { SOLID: 1, PLATFORM: 2, DECO: 3 };
+
+// 初期マップデータ（空白）
 let MAP_DATA = Array(MAP_HEIGHT).fill().map(() => Array(MAP_WIDTH).fill(0));
-let currentTileID = null; 
+
+// エディタのモード
+const EDIT_MODES = { NAV: 0, PLACE: 1, EDIT: 2, DRAG: 3 };
+let currentMode = EDIT_MODES.PLACE;
+let currentTileID = MAP_TYPES.SOLID; 
 
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
-    scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: true } },
     scene: { preload: preload, create: create, update: update }
 };
 
 const game = new Phaser.Game(config);
 
 function preload() {
-    this.load.image('bg', 'backgroundCastles.png');
-    this.load.image('t1', 'ground_stone.png');
-    this.load.image('t2', 'platform_wood.png');
-    this.load.image('t3', 'flag_red.png');
+    // --- Kenney素材のロード ---
+    this.load.image('bg_castle', 'backgroundCastles.png');
+    this.load.image('tile_solid', 'ground_center.png');
+    this.load.image('tile_plat', 'platform_wood.png');
+    this.load.image('deco_grass', 'grass.png');
+    
+    // --- UI用アイコン（iPad内のパスに合わせてください、なければ適当な四角になります） ---
+    this.load.image('icon_nav', 'icon_nav.png');     // 探索モード
+    this.load.image('icon_place', 'icon_place.png'); // 配置モード
+    this.load.image('icon_edit', 'icon_edit.png');   // 個別移動モード
+    this.load.image('icon_drag', 'icon_drag.png');   // 全体移動モード
 }
 
-let cam, marker, uiButtons = [];
+let cam, marker, mapLayer, uiContainer;
+let draggedSprite = null; // 現在ドラッグ中のスプライト
 
 function create() {
     const scene = this;
+    
+    // --- ゲーム世界の構築 ---
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
     cam = this.cameras.main;
     cam.setBounds(0, 0, WORLD_W, WORLD_H);
-    cam.setZoom(0.4); // 最初はかなり引いた視点
+    cam.setZoom(0.6); // 最初は引いた視点
 
-    // 1. 背景
-    this.add.image(0, 0, 'bg').setOrigin(0).setDisplaySize(WORLD_W, WORLD_H);
+    // 背景
+    const bg = this.add.image(0, 0, 'bg_castle').setOrigin(0).setDisplaySize(WORLD_W, WORLD_H);
 
-    // 2. グリッド (タイルより少し奥、背景より前)
-    const grid = this.add.grid(WORLD_W/2, WORLD_H/2, WORLD_W, WORLD_H, TILE_SIZE, TILE_SIZE, 0, 0, 0xffffff, 0.3).setOrigin(0.5);
-    grid.setDepth(0.5);
+    // グリッド線
+    this.add.grid(WORLD_W/2, WORLD_H/2, WORLD_W, WORLD_H, TILE_SIZE, TILE_SIZE, 0, 0, 0xffffff, 0.1).setOrigin(0.5);
 
-    // 3. マップレイヤー
-    this.mapLayer = this.add.group();
+    // マップレイヤー
+    mapLayer = this.physics.add.staticGroup();
 
-    // 4. エディタマーカー
+    // エディタマーカー
     marker = this.add.graphics().lineStyle(4, 0xffff00, 1).strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
     marker.setDepth(10);
 
-    // 5. UI（画面下部）
-    createBottomUI.call(this);
+    // --- UIの構築（画面下に固定） ---
+    createこだわりのUI.call(this);
 
-    // 6. 入力制御
-    this.input.addPointer(3);
-    setupTouchControls.call(this);
+    // --- マルチタッチ・ドラッグ設定 ---
+    this.input.addPointer(2); // 二本指ズーム用
+    setupエディタInputs.call(this);
+
+    // 最初にマップを描画
+    renderMap.call(this);
 }
 
-function setupTouchControls() {
+function setupエディタInputs() {
     let lastPinchDist = 0;
-    const scene = this;
+    let isNavigating = false;
+    let isOverallDragging = false;
+    let overallDragStartX = 0;
+    let overallDragStartY = 0;
 
-    this.input.on('pointermove', (p) => {
-        const p1 = scene.input.pointer1;
-        const p2 = scene.input.pointer2;
-        const p3 = scene.input.pointer3;
+    // --- タップ、ドラッグ処理（モード分岐） ---
+    this.input.on('pointerdown', (pointer) => {
+        // UIエリア（画面下160px）のタップは無視
+        if (pointer.y > window.innerHeight - 160) return;
 
-        // 三本指：カメラ移動（いつでも可能）
-        if (p1.isDown && p2.isDown && p3.isDown) {
-            cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
-            cam.scrollY -= (p.y - p.prevPosition.y) / cam.zoom;
-        } 
-        // 二本指：ピンチズーム
-        else if (p1.isDown && p2.isDown) {
+        const worldPoint = pointer.positionToCamera(cam);
+        const tx = Math.floor(worldPoint.x / TILE_SIZE);
+        const ty = Math.floor(worldPoint.y / TILE_SIZE);
+
+        if (tx < 0 || tx >= MAP_WIDTH || ty < 0 || ty >= MAP_HEIGHT) return;
+
+        switch (currentMode) {
+            case EDIT_MODES.NAV:
+                isNavigating = true; // 安全移動モード開始
+                break;
+            case EDIT_MODES.PLACE:
+                placeTile.call(this, pointer); // タイル配置
+                break;
+            case EDIT_MODES.EDIT:
+                // 素材の個別移動：そのマスにあるスプライトを探す
+                const spriteAt = mapLayer.getChildren().find(s => s.tx === tx && s.ty === ty);
+                if (spriteAt) {
+                    draggedSprite = spriteAt;
+                    // ドラッグ中のスプライトを強調
+                    spriteAt.setAlpha(0.7);
+                    spriteAt.setDepth(11);
+                }
+                break;
+            case EDIT_MODES.DRAG:
+                // 全体まとめて移動：ドラッグ開始座標を記録
+                isOverallDragging = true;
+                overallDragStartX = pointer.x;
+                overallDragStartY = pointer.y;
+                break;
+        }
+    });
+
+    this.input.on('pointermove', (pointer) => {
+        const p1 = this.input.pointer1;
+        const p2 = this.input.pointer2;
+
+        // 二本指：ピンチズーム（いつでも可能）
+        if (p1.isDown && p2.isDown) {
             let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
             if (lastPinchDist > 0) {
                 let zoomChange = dist / lastPinchDist;
-                cam.setZoom(Phaser.Math.Clamp(cam.zoom * zoomChange, 0.1, 2.0));
+                cam.setZoom(Phaser.Math.Clamp(cam.zoom * zoomChange, 0.2, 2.0));
             }
             lastPinchDist = dist;
-        } 
-        // 一本指
-        else if (p1.isDown && p1.y < window.innerHeight - 120) {
-            if (currentTileID !== null) {
-                // 素材選択中：タイル配置
-                placeTile.call(scene, p1);
-            } else {
-                // 素材未選択時：一本指でカメラ移動
-                cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
-                cam.scrollY -= (p.y - p.prevPosition.y) / cam.zoom;
-            }
+            return; // ズーム中は他の操作を無視
+        }
+
+        const worldPoint = pointer.positionToCamera(cam);
+        const tx = Math.floor(worldPoint.x / TILE_SIZE);
+        const ty = Math.floor(worldPoint.y / TILE_SIZE);
+
+        if (tx < 0 || tx >= MAP_WIDTH || ty < 0 || ty >= MAP_HEIGHT) return;
+
+        switch (currentMode) {
+            case EDIT_MODES.NAV:
+                if (isNavigating) {
+                    cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
+                    cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+                }
+                break;
+            case EDIT_MODES.PLACE:
+                if (pointer.isDown && pointer.y < window.innerHeight - 160) {
+                    placeTile.call(this, pointer);
+                }
+                break;
+            case EDIT_MODES.EDIT:
+                if (draggedSprite) {
+                    // スプライトをグリッドに沿って移動させる
+                    draggedSprite.x = tx * TILE_SIZE + TILE_SIZE / 2;
+                    draggedSprite.y = ty * TILE_SIZE + TILE_SIZE / 2;
+                }
+                break;
+            case EDIT_MODES.DRAG:
+                if (isOverallDragging) {
+                    // 全体まとめて移動：相対的なドラッグ量を計算
+                    const dragX = (pointer.x - pointer.prevPosition.x) / cam.zoom;
+                    const dragY = (pointer.y - pointer.prevPosition.y) / cam.zoom;
+                    
+                    // すべてのスプライトを移動（グリッドへの吸着はpointerupで行う）
+                    mapLayer.getChildren().forEach(sprite => {
+                        sprite.x += dragX;
+                        sprite.y += dragY;
+                    });
+                }
+                break;
         }
     });
 
-    this.input.on('pointerup', () => { lastPinchDist = 0; });
-    
-    this.input.on('pointerdown', (p) => {
-        if (p.y < window.innerHeight - 120 && currentTileID !== null && !scene.input.pointer2.isDown) {
-            placeTile.call(scene, p);
+    this.input.on('pointerup', () => {
+        lastPinchDist = 0;
+        isNavigating = false;
+        
+        if (draggedSprite) {
+            // 個別移動終了：データを更新して再描画
+            const tx = Math.floor(draggedSprite.x / TILE_SIZE);
+            const ty = Math.floor(draggedSprite.y / TILE_SIZE);
+            
+            MAP_DATA[draggedSprite.ty][draggedSprite.tx] = 0; // 元の場所を消す
+            MAP_DATA[ty][tx] = draggedSprite.id; // 新しい場所を上書き
+            
+            draggedSprite.setAlpha(1.0);
+            draggedSprite.setDepth(2);
+            draggedSprite = null;
+            renderMap.call(this); // グリッドにぴたっと合わせる
+        }
+        
+        if (isOverallDragging) {
+            // 全体まとめて移動終了：各スプライトを最寄りのグリッドへ吸着させる
+            const newMapData = Array(MAP_HEIGHT).fill().map(() => Array(MAP_WIDTH).fill(0));
+            
+            mapLayer.getChildren().forEach(sprite => {
+                const tx = Phaser.Math.Clamp(Math.floor(sprite.x / TILE_SIZE), 0, MAP_WIDTH - 1);
+                const ty = Phaser.Math.Clamp(Math.floor(sprite.y / TILE_SIZE), 0, MAP_HEIGHT - 1);
+                newMapData[ty][tx] = sprite.id;
+            });
+            
+            MAP_DATA = newMapData;
+            isOverallDragging = false;
+            renderMap.call(this); // グリッドにぴたっと合わせる
         }
     });
 }
 
-function createBottomUI() {
+function createこだわりのUI() {
     const scene = this;
-    const h = 120; // UIの高さ
-    const uiY = window.innerHeight - h;
+    const { width, height } = scene.scale;
+    
+    const h = 160; // UIエリアの高さ
+    const uiY = height - h;
 
-    const uiContainer = this.add.container(0, uiY).setScrollFactor(0).setDepth(100);
-    const bottomBar = this.add.rectangle(0, 0, window.innerWidth, h, 0x000000, 0.85).setOrigin(0);
-    uiContainer.add(bottomBar);
+    uiContainer = this.add.container(0, uiY).setScrollFactor(0).setDepth(100);
 
-    const tiles = [
-        { id: 1, key: 't1', label: 'SOLID' },
-        { id: 2, key: 't2', label: 'PLAT' },
-        { id: 3, key: 't3', label: 'DECO' }
+    // --- Googleタブ風 モード切り替えバー ---
+    const tabData = [
+        { key: EDIT_MODES.NAV, label: 'NAV', icon: 'icon_nav' },
+        { key: EDIT_MODES.PLACE, label: 'PLACE', icon: 'icon_place' },
+        { key: EDIT_MODES.EDIT, label: 'EDIT', icon: 'icon_edit' },
+        { key: EDIT_MODES.DRAG, label: 'DRAG', icon: 'icon_drag' }
     ];
+    
+    this.modeButtons = [];
 
-    tiles.forEach((tile, i) => {
-        const x = 80 + (i * 110);
-        const btn = this.add.container(x, h / 2).setInteractive(new Phaser.Geom.Rectangle(-50, -50, 100, 100), Phaser.Geom.Rectangle.Contains);
+    tabData.forEach((mode, i) => {
+        const x = (width / tabData.length) * (i + 0.5);
+        const y = 30;
         
-        const bg = this.add.rectangle(0, 0, 90, 90, 0x333333).setStrokeStyle(2, 0x666666);
-        const img = this.add.image(0, -10, tile.key).setDisplaySize(50, 50);
-        const txt = this.add.text(0, 25, tile.label, {fontSize: '14px', fontWeight: 'bold'}).setOrigin(0.5);
+        const btn = this.add.container(x, y).setInteractive(new Phaser.Geom.Rectangle(-40, -30, 80, 60), Phaser.Geom.Rectangle.Contains);
         
-        btn.add([bg, img, txt]);
+        const bg = this.add.rectangle(0, 0, 70, 50, 0x333333, 0.7).setOrigin(0.5);
+        const txt = this.add.text(0, 0, mode.label, { fontSize: '14px', fontWeight: 'bold' }).setOrigin(0.5);
         
+        btn.add([bg, txt]);
         btn.on('pointerdown', (p) => {
-            p.stopPropagation(); // ゲーム画面への浸透を防止
-            selectTile.call(scene, tile.id);
+            p.stopPropagation();
+            changeMode.call(scene, mode.key);
         });
         
         uiContainer.add(btn);
-        uiButtons.push({ id: tile.id, bg: bg });
+        this.modeButtons.push({ key: mode.key, bg: bg });
     });
-
-    // EXPORTボタン (右端)
-    const exportBtn = this.add.container(window.innerWidth - 100, h / 2).setInteractive(new Phaser.Geom.Rectangle(-60, -40, 120, 80), Phaser.Geom.Rectangle.Contains);
-    const exBg = this.add.rectangle(0, 0, 100, 60, 0x00aa00).setStrokeStyle(2, 0xffffff);
-    const exTxt = this.add.text(0, 0, 'EXPORT', {fontWeight: 'bold'}).setOrigin(0.5);
+    
+    // EXPORTボタン (右上の安全区域へ)
+    const exportBtn = this.add.container(width - 70, 30).setInteractive(new Phaser.Geom.Rectangle(-40, -30, 80, 60), Phaser.Geom.Rectangle.Contains);
+    const exBg = this.add.rectangle(0,0,70,50,0x00aa00, 0.7).setOrigin(0.5).setStrokeStyle(1, 0xffffff);
+    const exTxt = this.add.text(0,0,'EXPORT').setOrigin(0.5);
     exportBtn.add([exBg, exTxt]);
-    exportBtn.on('pointerdown', (p) => {
-        p.stopPropagation();
-        exportMapData();
-    });
+    exportBtn.on('pointerdown', (p) => { p.stopPropagation(); exportMapData(); });
     uiContainer.add(exportBtn);
 
-    // リサイズ対応
-    this.scale.on('resize', () => {
-        uiContainer.y = window.innerHeight - h;
-        bottomBar.width = window.innerWidth;
-        exportBtn.x = window.innerWidth - 100;
+    // --- 素材選択パネル (画面下部にこだわりのUI) ---
+    this.tileSelectionArea = this.add.container(0, 70).setScrollFactor(0);
+    
+    const panelBg = this.add.rectangle(0, 0, width, h - 70, 0x000000, 0.85).setOrigin(0).setStrokeStyle(1, 0xffffff, 0.2);
+    this.tileSelectionArea.add(panelBg);
+
+    this.addこだわりの素材Button.call(this);
+
+    uiContainer.add(this.tileSelectionArea);
+
+    // 初期モードを設定
+    changeMode.call(this, EDIT_MODES.PLACE);
+}
+
+function addこだわりの素材Button() {
+    const scene = this;
+    const tiles = [
+        { id: MAP_TYPES.SOLID, key: 'tile_solid', label: '土台' },
+        { id: MAP_TYPES.PLATFORM, key: 'tile_plat', label: '足場' },
+        { id: MAP_TYPES.DECO, key: 'deco_grass', label: '草' }
+    ];
+    
+    const paletteX = 70;
+    const paletteY = 45;
+    
+    this.tileButtons = [];
+
+    tiles.forEach((tile, i) => {
+        const x = paletteX + (i * 120);
+        
+        // こだわりのボタンコンテナ
+        const btn = this.add.container(x, paletteY).setInteractive(new Phaser.Geom.Rectangle(-50, -45, 100, 90), Phaser.Geom.Rectangle.Contains);
+        
+        const frame = this.add.rectangle(0, 0, 100, 80, 0x333333).setStrokeStyle(2, 0x666666);
+        const img = this.add.image(0, -10, tile.key).setDisplaySize(50, 50);
+        const txt = this.add.text(0, 25, tile.label, { fontSize: '14px', fontWeight: 'bold' }).setOrigin(0.5);
+        
+        btn.add([frame, img, txt]);
+        
+        // タップ時のフィードバック
+        btn.on('pointerdown', (p) => {
+            p.stopPropagation();
+            if (currentMode !== EDIT_MODES.PLACE) {
+                changeMode.call(scene, EDIT_MODES.PLACE); // 素材をタップしたら自動で配置モードに切り替え
+            }
+            selectTile.call(scene, tile.id);
+        });
+        
+        this.tileSelectionArea.add(btn);
+        this.tileButtons.push({ id: tile.id, frame: frame });
     });
+    
+    // 消しゴム
+    const eraserX = paletteX + (tiles.length * 120);
+    const eraserBtn = this.add.container(eraserX, paletteY).setInteractive(new Phaser.Geom.Rectangle(-50, -45, 100, 90), Phaser.Geom.Rectangle.Contains);
+    const exFrame = this.add.rectangle(0,0,100,80,0xffffff, 0.1).setStrokeStyle(1, 0xffffff, 0.2);
+    const exTxt = this.add.text(0,0,'消しゴム', {fontWeight: 'bold'}).setOrigin(0.5);
+    eraserBtn.add([exFrame, exTxt]);
+    eraserBtn.on('pointerdown', (p) => {
+        p.stopPropagation();
+        if (currentMode !== EDIT_MODES.PLACE) {
+            changeMode.call(scene, EDIT_MODES.PLACE);
+        }
+        selectTile.call(scene, 0); // 消しゴムID:0
+    });
+    this.tileSelectionArea.add(eraserBtn);
+    this.tileButtons.push({ id: 0, frame: exFrame });
+}
+
+function changeMode(modeKey) {
+    currentMode = modeKey;
+    const scene = this;
+
+    // モードボタンのビジュアル変更（Googleタブ風）
+    this.modeButtons.forEach(btn => {
+        if (btn.key === currentMode) {
+            btn.bg.setFillStyle(0x00ffff, 0.4);
+            btn.bg.setStrokeStyle(2, 0xffffff);
+        } else {
+            btn.bg.setFillStyle(0x333333, 0.7);
+            btn.bg.setStrokeStyle(0, 0x000000);
+        }
+    });
+    
+    // 素材パネルの表示切り替え
+    this.tileSelectionArea.visible = (currentMode === EDIT_MODES.PLACE);
+    if (!this.tileSelectionArea.visible) {
+        selectTile.call(this, null); // 素材パネルを閉じたら非選択にする
+    }
 }
 
 function selectTile(id) {
-    if (currentTileID === id) {
-        currentTileID = null; // トグルで解除
-    } else {
-        currentTileID = id;
-    }
+    currentTileID = id;
+    const scene = this;
 
-    uiButtons.forEach(btn => {
+    // 素材ボタンの枠線を可視化
+    this.tileButtons.forEach(btn => {
         if (btn.id === currentTileID) {
-            btn.bg.setStrokeStyle(4, 0xffff00);
-            btn.bg.setFillStyle(0x555555);
+            btn.frame.setStrokeStyle(4, 0xffff00); // 選択中は黄色
+            btn.frame.setFillStyle(0x555555);
         } else {
-            btn.bg.setStrokeStyle(2, 0x666666);
-            btn.bg.setFillStyle(0x333333);
+            btn.frame.setStrokeStyle(2, 0x666666);
+            btn.frame.setFillStyle(0x333333);
         }
     });
 }
 
 function placeTile(pointer) {
     const worldPoint = pointer.positionToCamera(cam);
-    const tx = Math.floor(worldPoint.x / TILE_SIZE);
-    const ty = Math.floor(worldPoint.y / TILE_SIZE);
+    const tx = Phaser.Math.Clamp(Math.floor(worldPoint.x / TILE_SIZE), 0, MAP_WIDTH - 1);
+    const ty = Phaser.Math.Clamp(Math.floor(worldPoint.y / TILE_SIZE), 0, MAP_HEIGHT - 1);
 
-    if (tx >= 0 && tx < MAP_WIDTH && ty >= 0 && ty < MAP_HEIGHT) {
-        MAP_DATA[ty][tx] = currentTileID;
-        renderMap.call(this);
-    }
+    MAP_DATA[ty][tx] = currentTileID;
+    renderMap.call(this);
 }
 
 function renderMap() {
-    this.mapLayer.clear(true, true);
-    const keys = { 1: 't1', 2: 't2', 3: 't3' };
+    mapLayer.clear(true, true);
+    const keys = { 
+        [MAP_TYPES.SOLID]: 'tile_solid', 
+        [MAP_TYPES.PLATFORM]: 'tile_plat', 
+        [MAP_TYPES.DECO]: 'deco_grass' 
+    };
 
     for (let r = 0; r < MAP_HEIGHT; r++) {
         for (let c = 0; c < MAP_WIDTH; c++) {
             const id = MAP_DATA[r][c];
-            if (!id) continue;
-            const img = this.mapLayer.create(c * TILE_SIZE + TILE_SIZE/2, r * TILE_SIZE + TILE_SIZE/2, keys[id]);
-            img.setDisplaySize(TILE_SIZE, TILE_SIZE);
-            img.setDepth(2);
+            if (id === 0) continue; // 空白は描画しない
+
+            const key = keys[id];
+            if (!key) continue;
+
+            const tileSprite = mapLayer.create(c * TILE_SIZE + TILE_SIZE/2, r * TILE_SIZE + TILE_SIZE/2, key);
+            tileSprite.setDisplaySize(TILE_SIZE, TILE_SIZE);
+            tileSprite.tx = c;
+            tileSprite.ty = r;
+            tileSprite.id = id;
+            
+            if (currentMode === EDIT_MODES.EDIT) {
+                // EDITモード中は素材に個別衝突判定を持たせる（タップできるように）
+                this.physics.add.existing(tileSprite, true);
+            }
         }
     }
 }
 
 function update() {
-    const worldPoint = this.input.activePointer.positionToCamera(cam);
-    marker.x = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE;
-    marker.y = Math.floor(worldPoint.y / TILE_SIZE) * TILE_SIZE;
-    marker.visible = (currentTileID !== null && this.input.activePointer.y < window.innerHeight - 120);
+    const scene = this;
+    const worldPoint = scene.input.activePointer.positionToCamera(cam);
+    const pointerTileX = Math.floor(worldPoint.x / TILE_SIZE);
+    const pointerTileY = Math.floor(worldPoint.y / TILE_SIZE);
+
+    marker.x = pointerTileX * TILE_SIZE;
+    marker.y = pointerTileY * TILE_SIZE;
+    
+    // 配置モード中かつUI上を触っていない時だけマーカーを表示
+    marker.visible = (currentMode === EDIT_MODES.PLACE && currentTileID !== null && scene.input.activePointer.y < window.innerHeight - 160);
 }
 
 function exportMapData() {
-    const res = JSON.stringify(MAP_DATA);
-    console.log("--- COPY DATA START ---");
-    console.log(res);
-    console.log("--- COPY DATA END ---");
-    alert("コンソールにJSONを出力しました。\n素材未選択の時は一本指でカメラ移動が可能です。");
+    console.log("--- 以下の配列を GitHub の MAP_DATA に貼り付けてください ---");
+    let output = "const MAP_DATA = [\n";
+    MAP_DATA.forEach(row => {
+        output += "    [" + row.join(", ") + "],\n";
+    });
+    output += "];";
+    console.log(output);
+    alert("コンソールにJSONを出力しました。\niPadのブラウザアプリの検証ツール等でコピーしてください。");
 }
 </script>
 </body>
