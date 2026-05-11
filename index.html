@@ -3,29 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Advanced Map Editor</title>
+    <title>iPad Pro Map Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
-    <style> body { margin: 0; background: #222; overflow: hidden; } </style>
+    <style> body { margin: 0; background: #1a1a1a; overflow: hidden; touch-action: none; } </style>
 </head>
 <body>
 <script>
-// --- 設定 ---
 const TILE_SIZE = 64;
-const MAP_WIDTH = 60;  // 横に長いマップ (約4000px)
-const MAP_HEIGHT = 30; // 縦
+const MAP_WIDTH = 60;
+const MAP_HEIGHT = 20;
 const WORLD_W = MAP_WIDTH * TILE_SIZE;
 const WORLD_H = MAP_HEIGHT * TILE_SIZE;
 
 let MAP_DATA = Array(MAP_HEIGHT).fill().map(() => Array(MAP_WIDTH).fill(0));
-let currentTileID = 1; 
+let currentTileID = null; // 初期値は何も選択していない状態
 
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#000',
     scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
-    physics: { default: 'arcade', arcade: { gravity: { y: 0 } } },
     scene: { preload: preload, create: create, update: update }
 };
 
@@ -33,122 +30,136 @@ const game = new Phaser.Game(config);
 
 function preload() {
     this.load.image('bg', 'backgroundCastles.png');
-    this.load.image('t1', 'ground_stone.png'); // SOLID
-    this.load.image('t2', 'platform_wood.png'); // PLATFORM
-    this.load.image('t3', 'flag_red.png');      // DECO
+    this.load.image('t1', 'ground_stone.png');
+    this.load.image('t2', 'platform_wood.png');
+    this.load.image('t3', 'flag_red.png');
 }
 
-let marker, cam, uiContainer;
+let cam, marker, uiButtons = [];
 
 function create() {
     cam = this.cameras.main;
     cam.setBounds(0, 0, WORLD_W, WORLD_H);
-    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
+    cam.setZoom(0.5); // 最初から少し引いた視点にする
 
-    // 1. 背景を引き延ばして配置
-    const bg = this.add.image(0, 0, 'bg').setOrigin(0, 0);
-    bg.setDisplaySize(WORLD_W, WORLD_H);
+    // 1. 背景 (最背面)
+    const bg = this.add.image(0, 0, 'bg').setOrigin(0).setDisplaySize(WORLD_W, WORLD_H);
 
-    // 2. グリッド線の表示
-    this.add.grid(WORLD_W/2, WORLD_H/2, WORLD_W, WORLD_H, TILE_SIZE, TILE_SIZE, 0xffffff, 0, 0xffffff, 0.1).setOrigin(0.5);
+    // 2. グリッド線 (背景のすぐ上)
+    const grid = this.add.grid(WORLD_W/2, WORLD_H/2, WORLD_W, WORLD_H, TILE_SIZE, TILE_SIZE, 0, 0, 0xffffff, 0.2);
+    grid.setDepth(1);
 
     // 3. マップレイヤー
     this.mapLayer = this.add.group();
 
-    // 4. エディタ用マーカー
-    marker = this.add.graphics().lineStyle(3, 0xffffff, 1).strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+    // 4. マーカー
+    marker = this.add.graphics().lineStyle(3, 0xffff00, 1).strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+    marker.setDepth(10);
 
-    // 5. UI（固定配置）
+    // 5. UI作成
     createUI.call(this);
 
-    // 6. 入力設定
-    setupInputs.call(this);
+    // 6. 入力制御（マルチタッチ）
+    this.input.addPointer(2); // 二本指
+    this.input.addPointer(3); // 三本指
+    
+    setupTouchControls.call(this);
 }
 
-function setupInputs() {
-    // タップで配置 / ドラッグで移動
-    this.isDragging = false;
-
-    this.input.on('pointerdown', (p) => {
-        if (p.y < 100) return; // UIエリア
-        if (p.rightButtonDown() || this.moveMode) {
-            this.isDragging = true;
-        } else {
-            placeTile.call(this, p);
-        }
-    });
+function setupTouchControls() {
+    let lastPinchDist = 0;
 
     this.input.on('pointermove', (p) => {
-        if (this.isDragging) {
+        const p1 = this.input.pointer1;
+        const p2 = this.input.pointer2;
+        const p3 = this.input.pointer3;
+
+        // 三本指：カメラ移動
+        if (p1.isDown && p2.isDown && p3.isDown) {
             cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
             cam.scrollY -= (p.y - p.prevPosition.y) / cam.zoom;
-        } else if (p.isDown && !this.moveMode) {
-            placeTile.call(this, p);
+        } 
+        // 二本指：ピンチズーム
+        else if (p1.isDown && p2.isDown) {
+            let dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+            if (lastPinchDist > 0) {
+                let zoomChange = dist / lastPinchDist;
+                cam.setZoom(Phaser.Math.Clamp(cam.zoom * zoomChange, 0.1, 2.0));
+            }
+            lastPinchDist = dist;
+        } 
+        // 一本指：タイル配置（素材選択中のみ）
+        else if (p1.isDown && currentTileID !== null && p1.y > 100) {
+            placeTile.call(this, p1);
         }
     });
 
-    this.input.on('pointerup', () => this.isDragging = false);
+    this.input.on('pointerup', () => {
+        lastPinchDist = 0;
+    });
+    
+    // タップで配置（単押し対応）
+    this.input.on('pointerdown', (p) => {
+        if (p.y > 100 && currentTileID !== null && !this.input.pointer2.isDown) {
+            placeTile.call(this, p);
+        }
+    });
 }
 
 function createUI() {
-    uiContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(1000);
-    const bg = this.add.rectangle(0, 0, window.innerWidth, 90, 0x000000, 0.7).setOrigin(0);
-    uiContainer.add(bg);
+    const uiContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
+    const topBar = this.add.rectangle(0, 0, window.innerWidth, 100, 0x000000, 0.8).setOrigin(0);
+    uiContainer.add(topBar);
 
-    const tabs = [
-        { id: 1, img: 't1', label: 'SOLID' },
-        { id: 2, img: 't2', label: 'PLAT' },
-        { id: 3, img: 't3', label: 'DECO' },
-        { id: 0, img: null, label: '消しゴム' }
+    const tiles = [
+        { id: 1, key: 't1', label: '土台' },
+        { id: 2, key: 't2', label: '足場' },
+        { id: 3, key: 't3', label: '旗' }
     ];
 
-    tabs.forEach((tab, i) => {
-        const x = 60 + (i * 90);
-        const btn = this.add.container(x, 45).setInteractive(new Phaser.Geom.Rectangle(-40, -40, 80, 80), Phaser.Geom.Rectangle.Contains);
+    tiles.forEach((tile, i) => {
+        const x = 70 + (i * 100);
+        const btn = this.add.container(x, 50).setInteractive(new Phaser.Geom.Rectangle(-40, -40, 80, 80), Phaser.Geom.Rectangle.Contains);
         
-        const frame = this.add.rectangle(0, 0, 70, 70, 0xffffff, 0.1).setStrokeStyle(2, 0xffffff);
-        if(tab.img) {
-            const img = this.add.image(0, -5, tab.img).setDisplaySize(40, 40);
-            btn.add(img);
-        }
-        const txt = this.add.text(0, 20, tab.label, {fontSize: '10px'}).setOrigin(0.5);
-        btn.add([frame, txt]);
-
-        btn.on('pointerdown', () => {
-            currentTileID = tab.id;
-            console.log("Selected:", tab.label);
-        });
+        const bg = this.add.rectangle(0, 0, 80, 80, 0x333333).setStrokeStyle(2, 0x666666);
+        const img = this.add.image(0, -5, tile.key).setDisplaySize(50, 50);
+        const txt = this.add.text(0, 25, tile.label, {fontSize: '12px'}).setOrigin(0.5);
+        
+        btn.add([bg, img, txt]);
+        btn.on('pointerdown', () => selectTile.call(this, tile.id, bg));
+        
         uiContainer.add(btn);
+        uiButtons.push({ id: tile.id, bg: bg });
     });
 
-    // ズームボタン
-    const zIn = createTextBtn.call(this, window.innerWidth - 120, 45, 'Zoom +', () => cam.setZoom(Math.min(cam.zoom + 0.2, 2)));
-    const zOut = createTextBtn.call(this, window.innerWidth - 50, 45, 'Zoom -', () => cam.setZoom(Math.max(cam.zoom - 0.2, 0.3)));
-    
-    // モード切替（移動/ペン）
-    this.moveMode = false;
-    const modeBtn = createTextBtn.call(this, window.innerWidth - 200, 45, 'MODE: PEN', (btn, txt) => {
-        this.moveMode = !this.moveMode;
-        txt.setText(this.moveMode ? 'MODE: MOVE' : 'MODE: PEN');
-    });
-
-    // 出力
-    createTextBtn.call(this, window.innerWidth - 280, 45, 'EXPORT', exportMapData);
-
-    uiContainer.add([zIn, zOut, modeBtn]);
+    // 出力ボタン
+    const exportBtn = this.add.container(window.innerWidth - 80, 50).setInteractive(new Phaser.Geom.Rectangle(-40, -40, 80, 80), Phaser.Geom.Rectangle.Contains);
+    exportBtn.add([this.add.rectangle(0,0,80,60,0x00aa00), this.add.text(0,0,'EXPORT').setOrigin(0.5)]);
+    exportBtn.on('pointerdown', exportMapData);
+    uiContainer.add(exportBtn);
 }
 
-function createTextBtn(x, y, label, callback) {
-    const btn = this.add.container(x, y).setInteractive(new Phaser.Geom.Rectangle(-35, -25, 70, 50), Phaser.Geom.Rectangle.Contains);
-    const bg = this.add.rectangle(0, 0, 70, 40, 0x444444).setStrokeStyle(1, 0xffffff);
-    const txt = this.add.text(0, 0, label, {fontSize: '12px'}).setOrigin(0.5);
-    btn.add([bg, txt]);
-    btn.on('pointerdown', () => callback(btn, txt));
-    return btn;
+function selectTile(id, bgElement) {
+    if (currentTileID === id) {
+        // 同じものをタップしたら非選択にする
+        currentTileID = null;
+    } else {
+        currentTileID = id;
+    }
+
+    // 全ボタンの枠線をリセットし、選択中のみ黄色くする
+    uiButtons.forEach(btn => {
+        if (btn.id === currentTileID) {
+            btn.bg.setStrokeStyle(4, 0xffff00);
+            btn.bg.setFillStyle(0x555555);
+        } else {
+            btn.bg.setStrokeStyle(2, 0x666666);
+            btn.bg.setFillStyle(0x333333);
+        }
+    });
 }
 
 function placeTile(pointer) {
-    if (pointer.y < 100) return;
     const worldPoint = pointer.positionToCamera(cam);
     const tx = Math.floor(worldPoint.x / TILE_SIZE);
     const ty = Math.floor(worldPoint.y / TILE_SIZE);
@@ -166,7 +177,7 @@ function renderMap() {
     for (let r = 0; r < MAP_HEIGHT; r++) {
         for (let c = 0; c < MAP_WIDTH; c++) {
             const id = MAP_DATA[r][c];
-            if (id === 0) continue;
+            if (!id) continue;
             const img = this.mapLayer.create(c * TILE_SIZE + TILE_SIZE/2, r * TILE_SIZE + TILE_SIZE/2, keys[id]);
             img.setDisplaySize(TILE_SIZE, TILE_SIZE);
         }
@@ -177,14 +188,14 @@ function update() {
     const worldPoint = this.input.activePointer.positionToCamera(cam);
     marker.x = Math.floor(worldPoint.x / TILE_SIZE) * TILE_SIZE;
     marker.y = Math.floor(worldPoint.y / TILE_SIZE) * TILE_SIZE;
+    
+    // 素材未選択時はマーカーを隠す
+    marker.visible = (currentTileID !== null);
 }
 
 function exportMapData() {
-    let res = "const MAP_DATA = [\n";
-    MAP_DATA.forEach(row => res += "  [" + row.join(",") + "],\n");
-    res += "];";
-    console.log(res);
-    alert("Consoleにデータを出力しました");
+    console.log(JSON.stringify(MAP_DATA));
+    alert("コンソールに書き出しました");
 }
 </script>
 </body>
