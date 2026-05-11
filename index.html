@@ -7,7 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         * {
-            -webkit-touch-callout: none;
+            -webkit-touch-callout: none; /* iOSでの長押しメニュー禁止 */
             -webkit-user-select: none;
             user-select: none;
             outline: none;
@@ -17,7 +17,7 @@
             margin: 0; 
             background-color: #333; 
             touch-action: none; 
-            overflow: hidden;
+            overflow: hidden; 
             width: 100vw;
             height: 100vh;
         }
@@ -26,7 +26,9 @@
 </head>
 <body>
 <script>
+// ブラウザのデフォルト挙動を徹底防止
 document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
 // --- 調整用パラメータ定数 ---
 const CHARGE_TIME_THRESHOLD = 250; 
@@ -55,17 +57,17 @@ const FAST_FALL_SPEED = 800;
 
 const BOUNCE_AMPLITUDE_MOVE = 4; 
 const BOUNCE_AMPLITUDE_IDLE = 2; 
-// -----------------------
 
 const config = {
     type: Phaser.AUTO,
-    width: 800,
+    width: 800, // 論理サイズ
     height: 600,
     backgroundColor: '#ffffff',
     scale: { 
         mode: Phaser.Scale.FIT, 
         autoCenter: Phaser.Scale.CENTER_BOTH,
-        parent: document.body
+        width: 800,
+        height: 600
     },
     physics: {
         default: 'arcade',
@@ -175,13 +177,17 @@ function create() {
     this.cameras.main.startFollow(playerMain, true, 0.1, 0.1);
 
     const setupUI = () => {
-        const sw = scene.scale.width;
-        const sh = scene.scale.height;
-        const joyX = 110, atkX = sw - 110, uiY = sh - 90, radius = 45;
+        // 画面端に基づいたUI座標の決定（レスポンシブ対応）
+        const w = scene.scale.width;
+        const h = scene.scale.height;
+        const joyX = 110;
+        const atkX = w - 110;
+        const uiY = h - 90;
+        const radius = 45;
 
-        this.add.circle(joyX, uiY, radius, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
+        const joyBase = this.add.circle(joyX, uiY, radius, 0x000000, 0.1).setScrollFactor(0).setDepth(100);
         const joyStick = this.add.circle(joyX, uiY, 20, 0x000000, 0.2).setScrollFactor(0).setDepth(101);
-        this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
+        const atkBase = this.add.circle(atkX, uiY, radius, 0xff0000, 0.1).setScrollFactor(0).setDepth(100);
         const atkStick = this.add.circle(atkX, uiY, 20, 0xff0000, 0.2).setScrollFactor(0).setDepth(102);
         
         const btnJ = this.add.circle(atkX - 95, uiY + 10, 35, 0x0000ff, 0.2).setInteractive().setScrollFactor(0).setDepth(100);
@@ -192,11 +198,13 @@ function create() {
 
         this.input.on('pointerdown', (p) => {
             if (isDodging) return;
-            if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 95, uiY + 10) < 35) return;
-            if (Phaser.Math.Distance.Between(p.x, p.y, atkX - 40, uiY - 75) < 35) return;
+            // ボタン判定（位置を動的に参照）
+            if (Phaser.Math.Distance.Between(p.x, p.y, btnJ.x, btnJ.y) < 35) return;
+            if (Phaser.Math.Distance.Between(p.x, p.y, btnS.x, btnS.y) < 35) return;
 
-            if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 40) movePointerId = p.id;
-            else if (Phaser.Math.Distance.Between(p.x, p.y, atkX, uiY) < radius + 20) {
+            if (Phaser.Math.Distance.Between(p.x, p.y, joyX, uiY) < radius + 30) {
+                movePointerId = p.id;
+            } else if (Phaser.Math.Distance.Between(p.x, p.y, atkX, uiY) < radius + 20) {
                 if (!airDodgeUsed) {
                     atkPointerId = p.id;
                     chargeTimer = scene.time.now;
@@ -212,7 +220,7 @@ function create() {
                 joyStick.setPosition(joyX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
                 joyInput = { x: Math.cos(ang) * (d/radius), y: Math.sin(ang) * (d/radius) };
             }
-            if (p.id === atkPointerId) {
+            if (p.id === atkPointerId && !airDodgeUsed) {
                 const ang = Phaser.Math.Angle.Between(atkX, uiY, p.x, p.y);
                 const d = Math.min(Phaser.Math.Distance.Between(atkX, uiY, p.x, p.y), radius);
                 atkStick.setPosition(atkX + Math.cos(ang) * d, uiY + Math.sin(ang) * d);
